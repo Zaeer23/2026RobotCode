@@ -25,7 +25,7 @@ import yams.motorcontrollers.local.SparkWrapper;
 public class KickerSubsystem extends SubsystemBase {
 
   private static final double KICKER_SPEED = 1.0;
-
+// testing?
   // SPARK MAX motor controller with NEO motor
   private SparkMax kickerSparkMax = new SparkMax(Constants.KickerConstants.kKickerMotorId, MotorType.kBrushless);
 
