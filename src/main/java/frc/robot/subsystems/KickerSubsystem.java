@@ -1,6 +1,7 @@
 package frc.robot.subsystems;
 
-import com.thethriftybot.ThriftyNova;
+import com.revrobotics.spark.SparkMax;
+import com.revrobotics.spark.SparkLowLevel.MotorType;
 
 import edu.wpi.first.math.system.plant.DCMotor;
 import static edu.wpi.first.units.Units.Amps;
@@ -19,14 +20,14 @@ import yams.motorcontrollers.SmartMotorControllerConfig;
 import yams.motorcontrollers.SmartMotorControllerConfig.ControlMode;
 import yams.motorcontrollers.SmartMotorControllerConfig.MotorMode;
 import yams.motorcontrollers.SmartMotorControllerConfig.TelemetryVerbosity;
-import yams.motorcontrollers.local.NovaWrapper;
+import yams.motorcontrollers.local.SparkWrapper;
 
 public class KickerSubsystem extends SubsystemBase {
 
   private static final double KICKER_SPEED = 1.0;
 
-  // Nova motor controller with NEO motor
-  private ThriftyNova kickerNova = new ThriftyNova(Constants.KickerConstants.kKickerMotorId);
+  // SPARK MAX motor controller with NEO motor
+  private SparkMax kickerSparkMax = new SparkMax(Constants.KickerConstants.kKickerMotorId, MotorType.kBrushless);
 
   private SmartMotorControllerConfig smcConfig = new SmartMotorControllerConfig(this)
       .withControlMode(ControlMode.OPEN_LOOP)
@@ -36,7 +37,7 @@ public class KickerSubsystem extends SubsystemBase {
       .withIdleMode(MotorMode.BRAKE)
       .withStatorCurrentLimit(Amps.of(20));
 
-  private SmartMotorController smc = new NovaWrapper(kickerNova, DCMotor.getNEO(1), smcConfig);
+  private SmartMotorController smc = new SparkWrapper(kickerSparkMax, DCMotor.getNEO(1), smcConfig);
 
   private final FlyWheelConfig kickerConfig = new FlyWheelConfig(smc)
       .withDiameter(Inches.of(4))
