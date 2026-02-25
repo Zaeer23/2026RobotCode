@@ -1,0 +1,58 @@
+Limelight.java command objective is to...
+
+1. Check if apriltag exist
+2. Rotate until centered (tx -> 0)
+3. Drive Forward slowly
+4. Let joystick adjust speed (your welcome Cade)
+
+LightRunner mainly implements the functionality
+
+Main Instructions:
+
+  >   Hook LimeLight.java to RobotContainer.java
+
+private final LimeLight limelight = new LimeLight("limelight");
+  
+  >   Then bind to a button
+  
+driverController.a().whileTrue(
+    new LimeLightRunner(
+        limelight,
+        swerveSubsystem,
+        () -> driverController.getLeftY()
+    )
+);
+
+>   This should make it so that Holding the A button would 
+    have the robot self-asign on AprilTag/Cade and driver 
+    will control speed slightly.
+    
+
+
+>   For Debugging. Change in Line 52 of LimeLightRunner.java
+
+swerve.drive(finalForward, 0, turn, true);
+
+>   To the following, because it uses drive(Translation2d translation, double rotation, boolean fieldRelative)
+
+swerve.drive(new Translation2d(finalForward, 0),   turn,   true);
+
+
+
+>   Some additional tip bits
+
+tv	target visible (0 or 1)
+tx	horizontal offset from crosshair
+ty	vertical offset
+ta	target area
+tid	AprilTag ID
+
+tx  → turning correction
+ta or ty → forward distance estimate
+
+
+
+
+
+
+
