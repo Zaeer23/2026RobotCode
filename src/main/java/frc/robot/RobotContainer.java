@@ -106,6 +106,22 @@ private final LimeLight limelight = new LimeLight("limelight");
     DriverStation.silenceJoystickConnectionWarning(true);
     NamedCommands.registerCommand("test", Commands.print("I EXIST"));
 
+    configureSubSystemKeys();
+    configureLimeLightKeys();
+  }
+
+  public void configureSubSystemKeys()
+  {
+
+    if (DriverStation.isTeleop())
+    {
+      // 
+    } 
+
+  }
+
+  public void configureLimeLightKeys()
+  {
     LimeLightRunner runner = new LimeLightRunner(limelight, drivebase, () -> driverXbox.getLeftY());
     runner.execute();
   }
