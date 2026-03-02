@@ -38,14 +38,7 @@ import yams.motorcontrollers.SmartMotorControllerConfig.TelemetryVerbosity;
 import yams.motorcontrollers.local.SparkWrapper;
 
 public class ShooterSubsystem extends SubsystemBase {
-  // 2 Neos, 4in shooter wheels
-  // private final ThriftyNova leaderNova = new ThriftyNova(
-  // Constants.ShooterConstants.kLeaderMotorId,
-  // ThriftyNova.MotorType.NEO);
 
-  // private final ThriftyNova followerNova = new ThriftyNova(
-  // Constants.ShooterConstants.kFollowerMotorId,
-  // ThriftyNova.MotorType.NEO);
 
   private final SparkMax leaderSpark = new SparkMax(Constants.ShooterConstants.kLeaderMotorId,
       MotorType.kBrushless);

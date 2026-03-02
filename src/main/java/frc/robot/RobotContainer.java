@@ -20,11 +20,17 @@ import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import edu.wpi.first.wpilibj2.command.button.Trigger;
 import frc.robot.Constants.OperatorConstants;
 import frc.robot.commands.LimeLightRunner;
+import frc.robot.subsystems.HopperSubsystem;
+import frc.robot.subsystems.IntakeSubsystem;
 import frc.robot.subsystems.LimeLight;
 import frc.robot.subsystems.swervedrive.SwerveSubsystem;
 import java.io.File;
 import swervelib.SwerveInputStream;
-
+import frc.robot.subsystems.Superstructure;
+import frc.robot.subsystems.HoodSubsystem;
+import frc.robot.subsystems.ShooterSubsystem;
+import frc.robot.subsystems.TurretSubsystem;
+import frc.robot.subsystems.KickerSubsystem;
 
 /**
  * This class is where the bulk of the robot should be declared. Since Command-based is a "declarative" paradigm, very
@@ -98,7 +104,18 @@ public class RobotContainer
    */
   // Declare the Limelight subsystem
 private final LimeLight limelight = new LimeLight("limelight");
-   
+   // Define the components (You may need to add imports for these)
+private final ShooterSubsystem m_shooter = new ShooterSubsystem();
+private final TurretSubsystem m_turret   = new TurretSubsystem();
+private final HoodSubsystem m_hood       = new HoodSubsystem();
+private final KickerSubsystem m_kicker   = new KickerSubsystem();
+private final IntakeSubsystem m_intake   = new IntakeSubsystem();
+private final HopperSubsystem m_hopper   = new HopperSubsystem();
+
+// Create the Superstructure instance
+private final Superstructure m_superstructure = new Superstructure(
+    m_shooter, m_turret, m_hood, m_intake, m_hopper, m_kicker
+);
   public RobotContainer()
   {
     // Configure the trigger bindings
@@ -113,12 +130,15 @@ private final LimeLight limelight = new LimeLight("limelight");
   public void configureSubSystemKeys()
   {
 
-    if (DriverStation.isTeleop())
-    {
-      // 
-    } 
+    
+    // No need for the isTeleop() check here, bindings are usually set once at startup
+    driverXbox.a().whileTrue(
+        m_superstructure.kickerFeedCommand()
+            .finallyDo(() -> m_superstructure.stopFeedingAllCommand().schedule())
+    );
+}
 
-  }
+  
 
   public void configureLimeLightKeys()
   {

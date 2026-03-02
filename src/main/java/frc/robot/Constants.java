@@ -39,7 +39,7 @@ public final class Constants
     public static final double WHEEL_LOCK_TIME = 10; // seconds
   }
   public static class KickerConstants {
-    public static final int kKickerMotorId = 17;
+    public static final int kKickerMotorId = 33; //NOT TEMPORARY, this is the actual ID for the kicker motor
   }
   public static class OperatorConstants
   {
@@ -53,13 +53,25 @@ public final class Constants
    
   public static class ShooterConstants {
     // 2 Neos, 4in shooter wheels
-    public static final int kLeaderMotorId = 15;
-    public static final int kFollowerMotorId = 16;
+    public static final int kLeaderMotorId = 15999;
+    public static final int kFollowerMotorId = 16999; //  temporary values, will need to be updated when shooter is implemented
   }
   
   public static class TurretConstants {
     // 1 Neo, 6.875 in diameter, 4:1 gearbox, 10:1 pivot gearing, non-continuous
     // 360 deg
-    public static final int kMotorId = 17;
+    public static final int kMotorId = 179999; // temporary value, will need to be updated when turret is implemented
+  }
+   public static class HopperConstants {
+    public static final int kHopperMotorId = 10000; // temporary value, will need to be updated when hopper is implemented
+  }
+  public static class HoodConstants {
+    // 1 Neo, 0-90 degree variability, 50:1 reduction
+    public static final int kMotorId = 199999;
+  } // temporary value, will need to be updated when hood is implemented
+  public static class IntakeConstants {
+    // SparkFlex controlling the intake flywheel
+    public static final int kPivotMotorId = 309999;  
+    public static final int kRollerMotorId = 31999; // temporary values, will need to be updated when intake is implemented
   }
 }
