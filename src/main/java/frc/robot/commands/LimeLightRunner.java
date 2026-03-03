@@ -32,9 +32,9 @@ public class LimeLightRunner extends Command {
 
     @Override
     public void execute() {
-        limelight.lightMode(4);
+        //limelight.lightMode(4);
         if (!limelight.hasTarget()) {
-            swerve.drive(new Translation2d(0,0),0.0,false);
+            //swerve.drive(new Translation2d(0,0),0.0,false);
             return;
         }
 

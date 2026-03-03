@@ -334,4 +334,39 @@ public class Superstructure extends SubsystemBase {
   public LinearVelocity getTangentialVelocity() {
     return shooter.getTangentialVelocity();
   }
+
+  public double getLimeLightApril_HorizontalAngle(LimeLight limelight)
+  {
+    return limelight.getTX();
+  }
+
+  public double getLimeLightApril_VerticalAngle(LimeLight limelight)
+  {
+    return limelight.getTY();
+  }
+
+  // Shane NEED TO CHANGE MATH, currently require height values, must make the math flexible based on concurrent data.
+  // If possible, record limelight position in the future. Use (scale / ta) for simplier distance calculations if needed.
+
+  // example: (return 30666 / limelight.getTA())
+
+  public double getLimelightAprilDistance(LimeLight limelight)
+  {
+    double targetOffsetAngle_Vertical = getLimeLightApril_HorizontalAngle(limelight);
+
+    // how many degrees back is your limelight rotated from perfectly vertical?
+    double limelightMountAngleDegrees = 0.0; 
+
+    // distance from the center of the Limelight lens to the floor
+    double limelightLensHeightInches = 20.0; 
+
+    // distance from the target to the floor
+    double goalHeightInches = 60.0; 
+
+    double angleToGoalDegrees = limelightMountAngleDegrees + targetOffsetAngle_Vertical;
+    double angleToGoalRadians = angleToGoalDegrees * (3.14159 / 180.0);
+
+    double distance = (goalHeightInches - limelightLensHeightInches) / Math.tan(angleToGoalRadians);
+    return distance;
+  }
 }
