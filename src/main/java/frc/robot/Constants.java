@@ -78,4 +78,26 @@ public final class Constants
     public static final int kPivotMotorId = 309999;  
     public static final int kRollerMotorId = 31999; // temporary values, will need to be updated when intake is implemented
   }
+
+    // Limelight values for limelight
+    public static class LimeLightConstants {
+      //the horizontal and vertical distance between the center of a camera's imaging sensor and the point where the optical axis intersects that sensor (the principal point).
+
+      public static final double[] principalPixelOffset = {-2.774 , 22.549};
+
+      // horizontal and vertical FOV
+      public static final double horizontalFOV = 54.505;
+      public static final double verticalFOV = 42.239;
+
+      // focal lengths in terms of pixel dimensions for the x and y axes, respectively
+      // (f_x , f_y)
+      public static final double[] focalLengths = {1221.445 , 1223.998};
+
+      // principal point, pixel coordinates of the center of the image
+      // (c_x , c_y)
+      public static final double[] principalPoint = {637.226 , 502.549};
+
+      // skew coefficient, we probably won't use this, it's always gonna be 1.
+      public static final double skewCoefficient = 1.000;
+    }
 }

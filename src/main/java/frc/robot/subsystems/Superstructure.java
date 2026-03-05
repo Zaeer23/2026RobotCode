@@ -358,7 +358,25 @@ public class Superstructure extends SubsystemBase {
 
   // example: (return 30666 / limelight.getTA())
 
-  public double getLimelightAprilDistance(LimeLight limelight)
+  // done! just need to test it, builders pls finish robot 🥺🥺
+
+  /*
+  12.236 at 20cm
+  3.192% at 40cm
+  2.025% at 50cm
+
+  pow curve = y = 4202.278x^2 - 1.949067
+   */
+
+  public double getLimelightAprilDistance_BasedScales(LimeLight limelight)
+  {
+    double givenScale = 4202.278; //30665.9;
+    double limelightScale = limelight.getTA();
+
+    return givenScale / limelightScale;
+  }
+
+  public double getLimelightAprilDistance_BasedHeights(LimeLight limelight)
   {
     double targetOffsetAngle_Vertical = getLimeLightApril_HorizontalAngle(limelight);
 
