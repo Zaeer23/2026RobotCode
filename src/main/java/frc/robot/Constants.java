@@ -51,19 +51,20 @@ public final class Constants
     public static final double TURN_CONSTANT    = 6;
   }
   public static class ClimberConstants {
-    public static final int kClimberMotorId = 36; // temporary value, will need to be updated when climber is implemented
+    public static final int kClimberMotorId = 36; 
+    public static final double kClimberSpeed = 0.8; 
   }
    
   public static class ShooterConstants {
-    // 2 Neos, 4in shooter wheels
-    public static final int kLeaderMotorId = 31;
-    public static final int kFollowerMotorId = 32; //  temporary values, will need to be updated when shooter is implemented
+    // 2 Neos, 4in shooter wheels 
+    public static final int kLeaderMotorId = 391; //remove 9 when turret mounted from both values.
+    public static final int kFollowerMotorId = 392; //  temporary values, will need to be updated when shooter is implemented
   }
   
   public static class TurretConstants {
     // 1 Neo, 6.875 in diameter, 4:1 gearbox, 10:1 pivot gearing, non-continuous
     // 360 deg
-    public static final int kMotorId = 35; // temporary value, will need to be updated when turret is implemented
+    public static final int kMotorId = 395; // temporary value, will need to be updated when turret is implemented
   }
    public static class HopperConstants {
     public static final int kHopperMotorId = 10000; // temporary value, will need to be updated when hopper is implemented

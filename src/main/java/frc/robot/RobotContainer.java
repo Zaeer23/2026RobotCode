@@ -27,10 +27,12 @@ import frc.robot.subsystems.swervedrive.SwerveSubsystem;
 import java.io.File;
 import swervelib.SwerveInputStream;
 import frc.robot.subsystems.Superstructure;
+import frc.robot.subsystems.ClimberSubsystem;
 import frc.robot.subsystems.HoodSubsystem;
 import frc.robot.subsystems.ShooterSubsystem;
 import frc.robot.subsystems.TurretSubsystem;
 import frc.robot.subsystems.KickerSubsystem;
+
 
 /**
  * This class is where the bulk of the robot should be declared. Since Command-based is a "declarative" paradigm, very
@@ -42,6 +44,7 @@ public class RobotContainer
 
   // Replace with CommandPS4Controller or CommandJoystick if needed
   final         CommandXboxController driverXbox = new CommandXboxController(0);
+  final         CommandXboxController shooterXbox = new CommandXboxController(1);
   // The robot's subsystems and commands are defined here...
   private final SwerveSubsystem       drivebase  = new SwerveSubsystem(new File(Filesystem.getDeployDirectory(),
                                                                                 "swerve/neo"));
@@ -111,6 +114,7 @@ private final HoodSubsystem m_hood       = new HoodSubsystem();
 private final KickerSubsystem m_kicker   = new KickerSubsystem();
 private final IntakeSubsystem m_intake   = new IntakeSubsystem();
 private final HopperSubsystem m_hopper   = new HopperSubsystem();
+private final ClimberSubsystem m_climber = new ClimberSubsystem();
 
 // Create the Superstructure instance
 private final Superstructure m_superstructure = new Superstructure(
@@ -129,17 +133,22 @@ private final Superstructure m_superstructure = new Superstructure(
 
   public void configureSubSystemKeys()
   {
-
-    
-    // No need for the isTeleop() check here, bindings are usually set once at startup
-    driverXbox.a().whileTrue(
+    shooterXbox.a().whileTrue(
         m_superstructure.kickerFeedCommand()
             .finallyDo(() -> m_superstructure.stopFeedingAllCommand().schedule())
     );
+    
+    shooterXbox.rightBumper().whileTrue(m_climber.climbUpCommand());
+    shooterXbox.leftBumper().whileTrue(m_climber.climbDownCommand());
+
+    //m_superstructure.setDefaultCommand(
+      //  m_superstructure.manualTurretControl(() -> {
+      //      double input = shooterXbox.getRightX();
+       //     return Math.abs(input) > 0.1 ? input : 0.0;
+       // })
+    //); fix later.
 }
-
   
-
   public void configureLimeLightKeys()
   {
     LimeLightRunner runner = new LimeLightRunner(limelight, drivebase, () -> driverXbox.getLeftY());

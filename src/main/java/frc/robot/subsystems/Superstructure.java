@@ -15,7 +15,7 @@ import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.wpilibj2.command.button.Trigger;
-import frc.robot.Constants;
+
 
 /**
  * Superstructure coordinates the shooter, turret, hood, and intake subsystems
@@ -176,7 +176,15 @@ public class Superstructure extends SubsystemBase {
   public Angle getTargetHoodAngle() {
     return targetHoodAngle;
   }
-
+/**
+   * Manual turret control command to be used with a joystick.
+   * @param speedSupplier A supplier for the turret motor speed (-1.0 to 1.0)
+   */
+  public Command manualTurretControl(Supplier<Double> speedSupplier) {
+    return run(() -> {
+      turret.set(speedSupplier.get()).schedule();
+    }).withName("Superstructure.manualTurret");
+  }
   
 
   
