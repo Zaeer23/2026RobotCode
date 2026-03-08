@@ -141,13 +141,12 @@ private final Superstructure m_superstructure = new Superstructure(
     shooterXbox.rightBumper().whileTrue(m_climber.climbUpCommand());
     shooterXbox.leftBumper().whileTrue(m_climber.climbDownCommand());
 
-    //m_superstructure.setDefaultCommand(
-      //  m_superstructure.manualTurretControl(() -> {
-      //      double input = shooterXbox.getRightX();
-       //     return Math.abs(input) > 0.1 ? input : 0.0;
-       // })
-    //); fix later.
-}
+        shooterXbox.povUp().whileTrue(m_superstructure.setTurretForward().withName("OperatorControls.setTurretForward"));
+      shooterXbox.povLeft().whileTrue(m_superstructure.setTurretLeft().withName("OperatorControls.setTurretLeft"));
+      shooterXbox.povRight().whileTrue(m_superstructure.setTurretRight().withName("OperatorControls.setTurretRight")); //fix NOW.
+       shooterXbox.rightTrigger().onTrue(m_superstructure.shootCommand());
+       shooterXbox.leftTrigger().onTrue(m_superstructure.stopShootingCommand());
+    }
   
   public void configureLimeLightKeys()
   {

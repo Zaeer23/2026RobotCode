@@ -176,15 +176,7 @@ public class Superstructure extends SubsystemBase {
   public Angle getTargetHoodAngle() {
     return targetHoodAngle;
   }
-/**
-   * Manual turret control command to be used with a joystick.
-   * @param speedSupplier A supplier for the turret motor speed (-1.0 to 1.0)
-   */
-  public Command manualTurretControl(Supplier<Double> speedSupplier) {
-    return run(() -> {
-      turret.set(speedSupplier.get()).schedule();
-    }).withName("Superstructure.manualTurret");
-  }
+// MANUAL TURRET CODE DOESNT F***ING WORK KILL EVERYONE INVOLVED IN MANUAL TURRET CODE
   
 
   
@@ -298,12 +290,7 @@ public class Superstructure extends SubsystemBase {
   }
 
   // Re-zero intake pivot if needed
-  public Command rezeroIntakePivotAndTurretCommand() {
-    return Commands.parallel(
-        turret.rezero().withName("Superstructure.rezeroTurret"),
-        intake.rezero().withName("Superstructure.rezeroIntakePivot"))
-        .withName("Superstructure.rezeroIntakePivotAndTurret");
-  }
+
 
   @Override
   public void periodic() {
@@ -359,7 +346,7 @@ public class Superstructure extends SubsystemBase {
   // example: (return 30666 / limelight.getTA())
 
   // done! just need to test it, builders pls finish robot 🥺🥺
-
+ 
   /*
   12.236 at 20cm
   3.192% at 40cm
