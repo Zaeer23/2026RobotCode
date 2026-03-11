@@ -137,13 +137,18 @@ private final Superstructure m_superstructure = new Superstructure(
         m_superstructure.kickerFeedCommand()
             .finallyDo(() -> m_superstructure.stopFeedingAllCommand().schedule())
     );
-    
+    m_superstructure.setDefaultCommand(
+      m_superstructure.manualTurretControl(() ->{
+        double input = shooterXbox.getRightX();
+        return Math.abs(input) > 0.1 ? input : 0;
+      })
+    );
     shooterXbox.rightBumper().whileTrue(m_climber.climbUpCommand());
     shooterXbox.leftBumper().whileTrue(m_climber.climbDownCommand());
 
-        shooterXbox.povUp().whileTrue(m_superstructure.setTurretForward().withName("OperatorControls.setTurretForward"));
-      shooterXbox.povLeft().whileTrue(m_superstructure.setTurretLeft().withName("OperatorControls.setTurretLeft"));
-      shooterXbox.povRight().whileTrue(m_superstructure.setTurretRight().withName("OperatorControls.setTurretRight")); //fix NOW.
+        shooterXbox.povUp().onTrue(m_superstructure.setTurretForward().withName("OperatorControls.setTurretForward"));
+      shooterXbox.povLeft().onTrue(m_superstructure.setTurretLeft().withName("OperatorControls.setTurretLeft"));
+      shooterXbox.povRight().onTrue(m_superstructure.setTurretRight().withName("OperatorControls.setTurretRight")); //fix NOW.
        shooterXbox.rightTrigger().onTrue(m_superstructure.shootCommand());
        shooterXbox.leftTrigger().onTrue(m_superstructure.stopShootingCommand());
     }

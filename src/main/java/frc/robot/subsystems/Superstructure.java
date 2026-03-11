@@ -176,9 +176,12 @@ public class Superstructure extends SubsystemBase {
   public Angle getTargetHoodAngle() {
     return targetHoodAngle;
   }
-// MANUAL TURRET CODE DOESNT F***ING WORK KILL EVERYONE INVOLVED IN MANUAL TURRET CODE
-  
-
+// redoing manual code
+public Command manualTurretControl(Supplier<Double> speedSupplier) {
+  return run(() -> {
+    turret.set(speedSupplier.get());
+  }).withName("Superstructure.manualTurret");
+}
   
 
   public Rotation3d getAimRotation3d() {
