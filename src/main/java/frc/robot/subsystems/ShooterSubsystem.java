@@ -39,7 +39,6 @@ import yams.motorcontrollers.local.SparkWrapper;
 
 public class ShooterSubsystem extends SubsystemBase {
 
-
   private final SparkMax leaderSpark = new SparkMax(Constants.ShooterConstants.kLeaderMotorId,
       MotorType.kBrushless);
 
@@ -69,18 +68,6 @@ public class ShooterSubsystem extends SubsystemBase {
   private final FlyWheel shooter = new FlyWheel(shooterConfig);
 
   public ShooterSubsystem() {
-    // leaderNova.factoryReset();
-    // followerNova.factoryReset();
-
-    // leaderNova.setVoltageCompensation(12);
-    // followerNova.setVoltageCompensation(12);
-
-    // leaderNova.setInverted(false);
-    // followerNova.setInverted(true);
-
-    // followerNova
-    // .setInversion(true)
-    // .follow(leaderNova.getID());
   }
 
   public Command setSpeed(AngularVelocity speed) {
@@ -91,43 +78,21 @@ public class ShooterSubsystem extends SubsystemBase {
     return shooter.setSpeed(speedSupplier);
   }
 
+  public Command setPercent(Supplier<Double> percentSupplier) {
+    return run(() -> leaderSpark.set(percentSupplier.get()));
+}
+
   public Command spinUp() {
     return setSpeed(RPM.of(5600));
-
-    // return setSpeed(RotationsPerSecond.of(50));
-
-    // return run(() -> {
-    // // followerNova.follow(leaderNova.getID());
-    // // followerNova.setInverted(true);
-
-    // // leaderNova.setPercent(SHOOTER_SPEED);
-    // // followerNova.setPercent(SHOOTER_SPEED);
-
-    // // followerNova.setPercent(0.5);
-    // });
-
-    // return shooter.set(0.5);
-    // return shooter.setSpeed(RotationsPerSecond.of(500));
   }
 
   public Command stop() {
     return setSpeed(RPM.of(0));
-    // return run(() -> {
-
-    // // leaderNova.setPercent(0);
-    // // followerNova.setPercent(0);
-    // // followerNova.setPercent(0.5);
-    // });
-    // return shooter.set(0);
   }
 
   public AngularVelocity getSpeed() {
     return shooter.getSpeed();
   }
-
-  // public Command set(double dutyCycle) {
-  // return shooter.set(dutyCycle);
-  // }
 
   public Command sysId() {
     return shooter.sysId(Volts.of(12), Volts.of(3).per(Second), Seconds.of(7));
@@ -149,10 +114,7 @@ public class ShooterSubsystem extends SubsystemBase {
   }
 
   public LinearVelocity getTangentialVelocity() {
-    // Calculate tangential velocity at the edge of the wheel and convert to
-    // LinearVelocity
-
     return MetersPerSecond.of(getSpeed().in(RadiansPerSecond)
-        * wheelRadius().in(Meters));  
+        * wheelRadius().in(Meters));
   }
 }

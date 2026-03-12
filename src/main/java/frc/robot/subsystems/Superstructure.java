@@ -294,10 +294,10 @@ public Command manualTurretControl(Supplier<Double> speedSupplier) {
  * Command to set shooter speed dynamically from a supplier.
  * Useful for trigger-scaled or vision-scaled shooting.
  *
- * @param speedSupplier Supplier for target shooter speed
+ * @param percentSupplier Supplier for target shooter percentage of raw power!!
  */
-public Command setShooterSpeedDynamic(Supplier<AngularVelocity> speedSupplier) {
-    return shooter.setSpeedDynamic(speedSupplier).withName("Superstructure.setShooterSpeedDynamic");
+public Command setShooterPercent(Supplier<Double> percentSupplier) {
+    return shooter.setPercent(percentSupplier).withName("Superstructure.setShooterPercent");
 }
 
   // Re-zero intake pivot if needed
@@ -340,6 +340,7 @@ public Command setShooterSpeedDynamic(Supplier<AngularVelocity> speedSupplier) {
   public LinearVelocity getTangentialVelocity() {
     return shooter.getTangentialVelocity();
   }
+  
   
 
   public double getLimeLightApril_HorizontalAngle(LimeLight limelight)

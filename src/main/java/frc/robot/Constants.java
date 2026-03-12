@@ -58,7 +58,8 @@ public final class Constants
   public static class ShooterConstants {
     // 2 Neos, 4in shooter wheels 
     public static final int kLeaderMotorId = 32;
-    public static final int kFollowerMotorId = 31; 
+    public static final int kFollowerMotorId = 31;
+    public static final double kShooterSpeed = 1.0; 
   }
   
   public static class TurretConstants {

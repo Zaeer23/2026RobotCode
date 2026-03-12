@@ -154,12 +154,9 @@ private final Superstructure m_superstructure = new Superstructure(
 //got rid of pov buttons because they like to break too often, might fix later for more precise aiming if we dont get limelight in time.
        
     new Trigger(() -> shooterXbox.getRightTriggerAxis() > 0.05)
-    .whileTrue(m_superstructure.setShooterSpeedDynamic(() -> {
-        double axis = shooterXbox.getRightTriggerAxis();
-        double minRPM = 500;
-        double maxRPM = 5600;
-        return RPM.of(minRPM + (maxRPM - minRPM) * axis);
-    }));
+    .whileTrue(m_superstructure.setShooterPercent(
+        () -> shooterXbox.getRightTriggerAxis()
+    ));
 
 shooterXbox.leftTrigger().onTrue(m_superstructure.stopShootingCommand());
 
