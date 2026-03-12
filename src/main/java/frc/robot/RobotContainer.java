@@ -3,7 +3,7 @@
 // the WPILib BSD license file in the root directory of this project.
 
 package frc.robot;
-
+import static edu.wpi.first.units.Units.RPM;
 import com.pathplanner.lib.auto.NamedCommands;
 import edu.wpi.first.math.controller.ProfiledPIDController;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -137,20 +137,35 @@ private final Superstructure m_superstructure = new Superstructure(
         m_superstructure.kickerFeedCommand()
             .finallyDo(() -> m_superstructure.stopFeedingAllCommand().schedule())
     );
-    m_superstructure.setDefaultCommand(
-      m_superstructure.manualTurretControl(() ->{
+    m_turret.setDefaultCommand(
+    m_superstructure.manualTurretControl(() -> {
         double input = shooterXbox.getRightX();
-        return Math.abs(input) > 0.1 ? input : 0;
-      })
-    );
+        if (Math.abs(input) < 0.1) return 0.0;
+        return Math.copySign(input * input, input); // squared input keeps sign
+    })
+);
+    
+    
+
+    
     shooterXbox.rightBumper().whileTrue(m_climber.climbUpCommand());
     shooterXbox.leftBumper().whileTrue(m_climber.climbDownCommand());
 
-        shooterXbox.povUp().onTrue(m_superstructure.setTurretForward().withName("OperatorControls.setTurretForward"));
-      shooterXbox.povLeft().onTrue(m_superstructure.setTurretLeft().withName("OperatorControls.setTurretLeft"));
-      shooterXbox.povRight().onTrue(m_superstructure.setTurretRight().withName("OperatorControls.setTurretRight")); //fix NOW.
-       shooterXbox.rightTrigger().onTrue(m_superstructure.shootCommand());
-       shooterXbox.leftTrigger().onTrue(m_superstructure.stopShootingCommand());
+//got rid of pov buttons because they like to break too often, might fix later for more precise aiming if we dont get limelight in time.
+       
+    new Trigger(() -> shooterXbox.getRightTriggerAxis() > 0.05)
+    .whileTrue(m_superstructure.setShooterSpeedDynamic(() -> {
+        double axis = shooterXbox.getRightTriggerAxis();
+        double minRPM = 500;
+        double maxRPM = 5600;
+        return RPM.of(minRPM + (maxRPM - minRPM) * axis);
+    }));
+
+shooterXbox.leftTrigger().onTrue(m_superstructure.stopShootingCommand());
+
+shooterXbox.leftTrigger().onTrue(m_superstructure.stopShootingCommand());
+
+shooterXbox.leftTrigger().onTrue(m_superstructure.stopShootingCommand());
     }
   
   public void configureLimeLightKeys()

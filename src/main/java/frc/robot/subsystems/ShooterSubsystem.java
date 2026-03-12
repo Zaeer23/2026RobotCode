@@ -62,7 +62,7 @@ public class ShooterSubsystem extends SubsystemBase {
   private final FlyWheelConfig shooterConfig = new FlyWheelConfig(smc)
       .withDiameter(Inches.of(4))
       .withMass(Pounds.of(1))
-      .withUpperSoftLimit(RPM.of(6000))
+      .withUpperSoftLimit(RPM.of(4000))
       .withLowerSoftLimit(RPM.of(0))
       .withTelemetry("Shooter", TelemetryVerbosity.HIGH);
 

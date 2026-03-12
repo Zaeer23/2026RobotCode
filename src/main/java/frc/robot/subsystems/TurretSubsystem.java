@@ -125,4 +125,36 @@ public class TurretSubsystem extends SubsystemBase {
   public void simulationPeriodic() {
     turret.simIterate();
   }
+  /**
+ * Sets turret duty cycle, scaling down near soft limits to prevent hard stops.
+ * Within SLOW_ZONE_DEGREES of a limit, output scales linearly from full → 0.
+ */
+private static final double SLOW_ZONE_DEGREES = 20.0; // start slowing 20° before limit because holy s*** it rips out everything on the shooter if we dont
+
+public Command manualSet(Supplier<Double> dutyCycleSupplier) {
+    return run(() -> {
+        double rawInput = dutyCycleSupplier.get();
+        double currentAngle = turret.getAngle().in(Degrees);
+        double scaledOutput = applySoftLimitScaling(rawInput, currentAngle);
+        turret.set(scaledOutput); 
+    }).withName("turret.manualSet");
+}
+
+private double applySoftLimitScaling(double input, double currentAngleDeg) {
+    double distanceToPositiveLimit = MAX_ONE_DIR_FOV - currentAngleDeg;  // e.g. 90 - current
+    double distanceToNegativeLimit = currentAngleDeg - (-MAX_ONE_DIR_FOV); // current - (-90)
+
+    double scale = 1.0;
+
+    // Approaching positive limit while commanding positive output
+    if (input > 0 && distanceToPositiveLimit < SLOW_ZONE_DEGREES) {
+        scale = Math.max(0.0, distanceToPositiveLimit / SLOW_ZONE_DEGREES);
+    }
+    // Approaching negative limit while commanding negative output
+    else if (input < 0 && distanceToNegativeLimit < SLOW_ZONE_DEGREES) {
+        scale = Math.max(0.0, distanceToNegativeLimit / SLOW_ZONE_DEGREES);
+    }
+
+    return input * scale;
+}
 }

@@ -177,10 +177,9 @@ public class Superstructure extends SubsystemBase {
     return targetHoodAngle;
   }
 // redoing manual code
+//  delegates to TurretSubsystem's manualSet which owns the logic because i for some reason am an idiot at coding new commands 🥺
 public Command manualTurretControl(Supplier<Double> speedSupplier) {
-  return run(() -> {
-    turret.set(speedSupplier.get());
-  }).withName("Superstructure.manualTurret");
+    return turret.manualSet(speedSupplier).withName("Superstructure.manualTurret");
 }
   
 
@@ -291,6 +290,15 @@ public Command manualTurretControl(Supplier<Double> speedSupplier) {
   public Command stopShootingCommand() {
     return shooter.stop().withName("Superstructure.stopShooting");
   }
+  /**
+ * Command to set shooter speed dynamically from a supplier.
+ * Useful for trigger-scaled or vision-scaled shooting.
+ *
+ * @param speedSupplier Supplier for target shooter speed
+ */
+public Command setShooterSpeedDynamic(Supplier<AngularVelocity> speedSupplier) {
+    return shooter.setSpeedDynamic(speedSupplier).withName("Superstructure.setShooterSpeedDynamic");
+}
 
   // Re-zero intake pivot if needed
 
@@ -332,6 +340,7 @@ public Command manualTurretControl(Supplier<Double> speedSupplier) {
   public LinearVelocity getTangentialVelocity() {
     return shooter.getTangentialVelocity();
   }
+  
 
   public double getLimeLightApril_HorizontalAngle(LimeLight limelight)
   {
