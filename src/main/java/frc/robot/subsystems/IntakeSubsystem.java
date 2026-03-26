@@ -15,6 +15,9 @@ import static edu.wpi.first.units.Units.Inches;
 import static edu.wpi.first.units.Units.Pounds;
 import static edu.wpi.first.units.Units.RPM;
 import static edu.wpi.first.units.Units.Seconds;
+
+import java.util.function.DoubleSupplier;
+
 import edu.wpi.first.units.measure.Angle;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
@@ -44,7 +47,7 @@ public class IntakeSubsystem extends SubsystemBase {
       .withControlMode(ControlMode.OPEN_LOOP)
       .withTelemetry("IntakeRollerMotor", TelemetryVerbosity.HIGH)
       .withGearing(new MechanismGearing(GearBox.fromReductionStages(1))) 
-      .withMotorInverted(true)
+      .withMotorInverted(false)
       .withIdleMode(MotorMode.COAST)
       .withStatorCurrentLimit(Amps.of(40));
 
@@ -67,7 +70,7 @@ public class IntakeSubsystem extends SubsystemBase {
       .withTelemetry("IntakePivotMotor", TelemetryVerbosity.HIGH)
       .withGearing(new MechanismGearing(GearBox.fromReductionStages(5, 5, 60.0 / 18.0)))
       .withMotorInverted(false)
-      .withIdleMode(MotorMode.COAST)
+      .withIdleMode(MotorMode.BRAKE)
       .withSoftLimit(Degrees.of(0), Degrees.of(150))
       .withStatorCurrentLimit(Amps.of(10))
       .withClosedLoopRampRate(Seconds.of(0.1))
@@ -86,6 +89,7 @@ public class IntakeSubsystem extends SubsystemBase {
       .withLength(Feet.of(1))
       .withMass(Pounds.of(2))
       .withTelemetry("IntakePivot", TelemetryVerbosity.HIGH);
+      
 
   private final Arm intakePivot = new Arm(intakePivotConfig);
 
@@ -127,6 +131,11 @@ public class IntakeSubsystem extends SubsystemBase {
       setIntakeHold();
     }).withName("Intake.BackFeedAndRoll");
   }
+  public Command manualPivot(DoubleSupplier speed) {
+    return Commands.run(() -> intakePivotController.setDutyCycle(speed.getAsDouble()), this)
+        .finallyDo(() -> intakePivotController.setDutyCycle(0))
+        .withName("IntakePivot.Manual");
+}
 
   private void setIntakeStow() {
     intakePivotController.setPosition(Degrees.of(0));

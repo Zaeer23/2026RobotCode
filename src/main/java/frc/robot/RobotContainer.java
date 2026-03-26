@@ -11,6 +11,7 @@ import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.trajectory.TrapezoidProfile.Constraints;
 import edu.wpi.first.math.util.Units;
+import edu.wpi.first.units.measure.Angle;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.Filesystem;
 import edu.wpi.first.wpilibj.RobotBase;
@@ -133,10 +134,9 @@ private final Superstructure m_superstructure = new Superstructure(
 
   public void configureSubSystemKeys()
   {
-    shooterXbox.a().whileTrue(
-        m_superstructure.kickerFeedCommand()
-            .finallyDo(() -> m_superstructure.stopFeedingAllCommand().schedule())
-    );
+    shooterXbox.a().whileTrue(m_superstructure.kickerFeedCommand());
+    shooterXbox.x().whileTrue(m_superstructure.hopperFeedCommand());
+    shooterXbox.y().whileTrue(m_superstructure.hopperReverseCommand());
     m_turret.setDefaultCommand(
     m_superstructure.manualTurretControl(() -> {
         double input = shooterXbox.getRightX();
@@ -147,7 +147,9 @@ private final Superstructure m_superstructure = new Superstructure(
     
     
 
-    
+    m_intake.setDefaultCommand(
+    m_intake.manualPivot(() -> shooterXbox.getLeftY())
+);
     shooterXbox.rightBumper().whileTrue(m_climber.climbUpCommand());
     shooterXbox.leftBumper().whileTrue(m_climber.climbDownCommand());
 
@@ -157,12 +159,8 @@ private final Superstructure m_superstructure = new Superstructure(
     .whileTrue(m_superstructure.setShooterPercent(
         () -> shooterXbox.getRightTriggerAxis()
     ));
+shooterXbox.b().whileTrue(m_superstructure.intakeCommand());
 
-shooterXbox.leftTrigger().onTrue(m_superstructure.stopShootingCommand());
-
-shooterXbox.leftTrigger().onTrue(m_superstructure.stopShootingCommand());
-
-shooterXbox.leftTrigger().onTrue(m_superstructure.stopShootingCommand());
     }
   
   public void configureLimeLightKeys()

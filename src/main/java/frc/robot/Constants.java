@@ -68,7 +68,7 @@ public final class Constants
     public static final int kMotorId = 35; 
   }
    public static class HopperConstants {
-    public static final int kHopperMotorId = 10000; // temporary value, will need to be updated when hopper is implemented
+    public static final int kHopperMotorId = 43; // temporary value, will need to be updated when hopper is implemented
   }
   public static class HoodConstants {
     // 1 Neo, 0-90 degree variability, 50:1 reduction
@@ -76,8 +76,8 @@ public final class Constants
   } // temporary value, will need to be updated when hood is implemented
   public static class IntakeConstants {
     // SparkFlex controlling the intake flywheel
-    public static final int kPivotMotorId = 309999;  
-    public static final int kRollerMotorId = 31999; // temporary values, will need to be updated when intake is implemented
+    public static final int kPivotMotorId = 42;  
+    public static final int kRollerMotorId = 41; // temporary values, will need to be updated when intake is implemented
   }
 
     // Limelight values for limelight
