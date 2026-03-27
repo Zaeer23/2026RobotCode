@@ -82,7 +82,7 @@ public class LimeLight {
   }
 
   // this is locally to what the camera is seeing
-  public double getLimelightPose3d()
+  public Pose3d getLimelightPose3d()
   {
     double distance = getLimelightAprilDistance_BasedScales();
 

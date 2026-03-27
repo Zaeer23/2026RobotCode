@@ -1,4 +1,4 @@
-package frc.robot.util;
+package frc.robot.subsystems;
 
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
@@ -116,7 +116,7 @@ public class ProjectileMotion {
             return String.format(
                 "ShotSolution[turret=%.1f° | launch=%.1f° | speed=%.2f m/s | dist=%.2f m | ~%.0f RPM | %s]",
                 turretAngleDegrees, launchAngleDegrees, launchSpeedMetersPerSecond,
-                horizontalDistanceMeters, estimatedFlywheelRPM, message);
+                horizontaldistanceMeters, estimatedFlywheelRPM, message);
         }
 
     }
@@ -300,7 +300,7 @@ public class ProjectileMotion {
 
         if (vx < 1e-6) return 0.0;
 
-        return sol.horizontalDistanceMeters / vx;
+        return sol.horizontaldistanceMeters / vx;
     }
 
 
