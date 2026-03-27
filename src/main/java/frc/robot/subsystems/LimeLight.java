@@ -1,5 +1,8 @@
 package frc.robot.subsystems;
 
+import edu.wpi.first.math.geometry.Pose3d;
+import edu.wpi.first.math.geometry.Rotation3d;
+import edu.wpi.first.math.geometry.Translation3d;
 import edu.wpi.first.networktables.NetworkTable;
 import edu.wpi.first.networktables.NetworkTableInstance;
 
@@ -54,4 +57,64 @@ public class LimeLight {
     public double getForwardCorrection(double desiredArea, double kP) {
         return (desiredArea - getTA()) * kP;
     }
+
+    // Shane NEED TO CHANGE MATH, currently require height values, must make the math flexible based on concurrent data.
+  // If possible, record limelight position in the future. Use (scale / ta) for simplier distance calculations if needed.
+
+  // example: (return 30666 / limelight.getTA())
+
+  // done! just need to test it, builders pls finish robot 🥺🥺
+ 
+  /*
+  12.236 at 20cm
+  3.192% at 40cm
+  2.025% at 50cm
+
+  pow curve = y = 4202.278x^2 - 1.949067
+   */
+
+  public double getLimelightAprilDistance_BasedScales()
+  {
+    double givenScale = 4202.278; //30665.9;
+    double limelightScale = getTA();
+
+    return givenScale / limelightScale;
+  }
+
+  // this is locally to what the camera is seeing
+  public double getLimelightPose3d()
+  {
+    double distance = getLimelightAprilDistance_BasedScales();
+
+    double tx = Math.toRadians(getTX());
+    double ty = Math.toRadians(getTY());
+
+    double x = distance * Math.sin(tx);
+    double y = distance * Math.sin(ty);
+    double z = distance * Math.cos(ty);
+
+    return new Pose3d(new Translation3d(x, y, z), new Rotation3d()); //we don't need to know the rotation
+  }
+
+
+  // Deprecated until we can get the limelight position, but this is the more accurate way to do it, just need to make it flexible for different heights and angles
+  public double getLimelightAprilDistance_BasedHeights() 
+  {
+    double targetOffsetAngle_Vertical = getTX();
+
+    // how many degrees back is your limelight rotated from perfectly vertical?
+    double limelightMountAngleDegrees = 0.0; 
+
+    // distance from the center of the Limelight lens to the floor
+    double limelightLensHeightInches = 20.0; 
+
+    // distance from the target to the floor
+    double goalHeightInches = 60.0; 
+
+    double angleToGoalDegrees = limelightMountAngleDegrees + targetOffsetAngle_Vertical;
+    double angleToGoalRadians = angleToGoalDegrees * (3.14159 / 180.0);
+
+    double distance = (goalHeightInches - limelightLensHeightInches) / Math.tan(angleToGoalRadians);
+    return distance;
+  }
 }

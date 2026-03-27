@@ -352,47 +352,4 @@ public Command setShooterPercent(Supplier<Double> percentSupplier) {
   {
     return limelight.getTY();
   }
-
-  // Shane NEED TO CHANGE MATH, currently require height values, must make the math flexible based on concurrent data.
-  // If possible, record limelight position in the future. Use (scale / ta) for simplier distance calculations if needed.
-
-  // example: (return 30666 / limelight.getTA())
-
-  // done! just need to test it, builders pls finish robot 🥺🥺
- 
-  /*
-  12.236 at 20cm
-  3.192% at 40cm
-  2.025% at 50cm
-
-  pow curve = y = 4202.278x^2 - 1.949067
-   */
-
-  public double getLimelightAprilDistance_BasedScales(LimeLight limelight)
-  {
-    double givenScale = 4202.278; //30665.9;
-    double limelightScale = limelight.getTA();
-
-    return givenScale / limelightScale;
-  }
-
-  public double getLimelightAprilDistance_BasedHeights(LimeLight limelight)
-  {
-    double targetOffsetAngle_Vertical = getLimeLightApril_HorizontalAngle(limelight);
-
-    // how many degrees back is your limelight rotated from perfectly vertical?
-    double limelightMountAngleDegrees = 0.0; 
-
-    // distance from the center of the Limelight lens to the floor
-    double limelightLensHeightInches = 20.0; 
-
-    // distance from the target to the floor
-    double goalHeightInches = 60.0; 
-
-    double angleToGoalDegrees = limelightMountAngleDegrees + targetOffsetAngle_Vertical;
-    double angleToGoalRadians = angleToGoalDegrees * (3.14159 / 180.0);
-
-    double distance = (goalHeightInches - limelightLensHeightInches) / Math.tan(angleToGoalRadians);
-    return distance;
-  }
 }
