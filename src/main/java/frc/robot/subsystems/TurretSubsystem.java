@@ -139,6 +139,35 @@ public Command manualSet(Supplier<Double> dutyCycleSupplier) {
         turret.set(scaledOutput).schedule();
     }).withName("turret.manualSet");
 }
+private static final double LIMELIGHT_HORIZONTAL_OFFSET_INCHES = 7.75;
+private static final double LIMELIGHT_FORWARD_OFFSET_INCHES = 5.5;
+private static final double LIMELIGHT_OFFSET_DEGREES =
+    Math.toDegrees(Math.atan2(LIMELIGHT_HORIZONTAL_OFFSET_INCHES, LIMELIGHT_FORWARD_OFFSET_INCHES));
+
+public Command trackTarget(LimeLight limelight) {
+    return run(() -> {
+        LimeLight.AprilTagScan scan = limelight.scan();
+        double currentAngle = turret.getAngle().in(Degrees);
+
+        if (!scan.isValid()) {
+            spark.set(0); // no target, hold still
+            return;
+        }
+
+        double tx = scan.tx - LIMELIGHT_OFFSET_DEGREES;
+
+        if (Math.abs(tx) < 3.0) {
+            spark.set(0); // close enough, stop
+            return;
+        }
+
+        double targetAngle = Math.max(-MAX_ONE_DIR_FOV,
+                             Math.min(MAX_ONE_DIR_FOV, currentAngle - tx));
+
+        turret.setAngle(Degrees.of(targetAngle)).schedule();
+
+    }).withName("Turret.trackTarget");
+}
 
 private double applySoftLimitScaling(double input, double currentAngleDeg) {
     double distanceToPositiveLimit = MAX_ONE_DIR_FOV - currentAngleDeg;  // e.g. 90 - current

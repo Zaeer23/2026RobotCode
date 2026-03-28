@@ -250,7 +250,9 @@ public Command manualTurretControl(Supplier<Double> speedSupplier) {
   public Command limelightAlignCommand(SwerveSubsystem drivebase) {
     return limelight.alignCommand(drivebase).withName("Superstructure.limelightAlign");
   }
-
+public Command trackTargetCommand(LimeLight limelight) {
+    return turret.trackTarget(limelight).withName("Superstructure.trackTarget");
+}
 
 
 

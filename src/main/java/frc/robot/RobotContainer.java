@@ -165,7 +165,7 @@ NamedCommands.registerCommand("DeployIntake",
 
   
 
-
+shooterXbox.y().whileTrue(m_turret.trackTarget(m_limelight));
 m_intake.setDefaultCommand(
     m_intake.manualPivot(() -> -shooterXbox.getLeftY())
 );

@@ -68,7 +68,7 @@ public final class Constants
     public static final int kMotorId = 35; 
   }
    public static class HopperConstants {
-    public static final int kHopperMotorId = 43; // temporary value, will need to be updated when hopper is implemented
+    public static final int kHopperMotorId = 433; // temporary value, will need to be updated when hopper is implemented
   }
   public static class HoodConstants {
     // 1 Neo, 0-90 degree variability, 50:1 reduction

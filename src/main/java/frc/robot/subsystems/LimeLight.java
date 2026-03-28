@@ -13,7 +13,7 @@ import edu.wpi.first.networktables.NetworkTableInstance;
 
 /*
 
-  File Destinatoin:    frc/robot/subsystems/vision/LimeLight.java
+  File Destination:    frc/robot/subsystems/vision/LimeLight.java
 
   Command Execution:  frc/robot/commands/vision/LimeLightRunner.java
 
@@ -160,5 +160,41 @@ public double getAlignOmega() {
         )
         .until(this::isCentered)
         .withName("LimeLight.align");
+        
   }
+  public static class AprilTagScan {
+    public final boolean hasTarget;
+    public final int tagID;
+    public final double tx;
+    public final double ty;
+    public final double distance;
+    public final Pose3d pose;
+
+    public AprilTagScan(boolean hasTarget, int tagID, double tx, double ty, double distance, Pose3d pose) {
+        this.hasTarget = hasTarget;
+        this.tagID = tagID;
+        this.tx = tx;
+        this.ty = ty;
+        this.distance = distance;
+        this.pose = pose;
+    }
+
+    public boolean isValid() {
+        return hasTarget && tagID != -1;
+    }
+}
+
+public AprilTagScan scan() {
+    boolean target = hasTarget();
+    return new AprilTagScan(
+        target,
+        getTagID(),
+        getTX(),
+        getTY(),
+        target ? getLimelightAprilDistance_BasedScales() : 0.0,
+        target ? getLimelightPose3d() : new Pose3d()
+    );
+    
+}
+
 }
