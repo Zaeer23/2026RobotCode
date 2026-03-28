@@ -2,6 +2,8 @@ package frc.robot.subsystems;
 
 import java.util.function.Supplier;
 
+import javax.sound.sampled.LineEvent;
+
 import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.math.geometry.Rotation3d;
 import edu.wpi.first.math.geometry.Translation3d;
@@ -15,6 +17,7 @@ import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.wpilibj2.command.button.Trigger;
+import frc.robot.subsystems.swervedrive.SwerveSubsystem;
 
 
 /**
@@ -29,6 +32,7 @@ public class Superstructure extends SubsystemBase {
   public final IntakeSubsystem intake;
   public final HopperSubsystem hopper;
   public final KickerSubsystem kicker;
+  public final LimeLight limelight;
 
   // Tolerance for "at setpoint" checks
   private static final AngularVelocity SHOOTER_TOLERANCE = RPM.of(100);
@@ -48,13 +52,14 @@ public class Superstructure extends SubsystemBase {
   // Default aim point is red hub
 
   public Superstructure(ShooterSubsystem shooter, TurretSubsystem turret, HoodSubsystem hood, IntakeSubsystem intake,
-      HopperSubsystem hopper, KickerSubsystem kicker) {
+      HopperSubsystem hopper, KickerSubsystem kicker, LimeLight limelight) {
     this.shooter = shooter;
     this.turret = turret;
     this.hood = hood;
     this.intake = intake;
     this.hopper = hopper;
     this.kicker = kicker;
+    this.limelight = limelight;
 
     // Create triggers for checking if mechanisms are at their targets
     this.isShooterAtSpeed = new Trigger(
@@ -234,6 +239,12 @@ public Command manualTurretControl(Supplier<Double> speedSupplier) {
     return kicker.stopCommand().withName("Superstructure.kickerStop");
   }
 
+  //limelight commands
+
+  public Command limelightAlignCommand(SwerveSubsystem drivebase) {
+    return limelight.alignCommand(drivebase).withName("Superstructure.limelightAlign");
+  }
+
   public Command feedAllCommand() {
     return Commands.parallel(
         hopper.feedCommand().asProxy(),
@@ -341,7 +352,9 @@ public Command setShooterPercent(Supplier<Double> percentSupplier) {
     return shooter.getTangentialVelocity();
   }
   
-  
+  public boolean limelightHasTarget() {
+    return limelight.hasTarget();
+  }
 
   public double getLimeLightApril_HorizontalAngle(LimeLight limelight)
   {
@@ -352,4 +365,6 @@ public Command setShooterPercent(Supplier<Double> percentSupplier) {
   {
     return limelight.getTY();
   }
+
+
 }

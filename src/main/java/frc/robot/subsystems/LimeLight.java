@@ -2,7 +2,11 @@ package frc.robot.subsystems;
 
 import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.math.geometry.Rotation3d;
+import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.geometry.Translation3d;
+import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj2.command.Commands;
+import frc.robot.subsystems.swervedrive.SwerveSubsystem;
 import edu.wpi.first.networktables.NetworkTable;
 import edu.wpi.first.networktables.NetworkTableInstance;
 
@@ -14,6 +18,10 @@ import edu.wpi.first.networktables.NetworkTableInstance;
 
 */
 public class LimeLight {
+
+  public static double ALIGN_KP = 0.06;
+  public static double ALIGN_MAX_OMEGA_RAD_S = 1.5;
+  public static double ALIGN_TOLERANCE_DEGREES = 1.0;
 
     private final NetworkTable table;
 
@@ -117,4 +125,31 @@ public class LimeLight {
     double distance = (goalHeightInches - limelightLensHeightInches) / Math.tan(angleToGoalRadians);
     return distance;
   }
+
+  public boolean isCentered() {
+        return hasTarget() && Math.abs(getTX()) < ALIGN_TOLERANCE_DEGREES;
+  }
+
+public double getAlignOmega() {
+        if (!hasTarget()) return 0.0;
+        // TX positive = target right = need to rotate right = negative omega in WPILib convention
+        double omega = -getTX() * ALIGN_KP;
+        return Math.max(-ALIGN_MAX_OMEGA_RAD_S, Math.min(ALIGN_MAX_OMEGA_RAD_S, omega));
+    }
+
+  // commands
+
+  public Command alignCommand(SwerveSubsystem drivebase) {
+    return Commands.run(
+            () -> drivebase.drive(
+                Translation2d.kZero,   // no translation — spin in place
+                getAlignOmega(),       // proportional rotation toward target
+                true                   // field-relative keeps heading stable
+            ),
+            drivebase                  // requires drivebase — interrupts teleop drive
+        )
+        .until(this::isCentered)
+        .withName("LimeLight.align");
+  }
+
 }

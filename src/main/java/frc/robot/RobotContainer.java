@@ -108,7 +108,7 @@ public class RobotContainer
    * The container for the robot. Contains subsystems, OI devices, and commands.
    */
   // Declare the Limelight subsystem
-private final LimeLight limelight = new LimeLight("limelight");
+private final LimeLight m_limelight = new LimeLight("limelight");
    // Define the components (You may need to add imports for these)
 private final ShooterSubsystem m_shooter = new ShooterSubsystem();
 private final TurretSubsystem m_turret   = new TurretSubsystem();
@@ -118,9 +118,10 @@ private final IntakeSubsystem m_intake   = new IntakeSubsystem();
 private final HopperSubsystem m_hopper   = new HopperSubsystem();
 private final ClimberSubsystem m_climber = new ClimberSubsystem();
 
+
 // Create the Superstructure instance
 private final Superstructure m_superstructure = new Superstructure(
-    m_shooter, m_turret, m_hood, m_intake, m_hopper, m_kicker
+    m_shooter, m_turret, m_hood, m_intake, m_hopper, m_kicker, m_limelight
 );
 
   public RobotContainer()
@@ -160,6 +161,7 @@ NamedCommands.registerCommand("DeployIntake",
     )
 );
 
+
 // ------------------ END OF AUTONOMOUS COMMANDS --------------------
 
   m_intake.setDefaultCommand(
@@ -184,7 +186,7 @@ shooterXbox.b().whileTrue(m_superstructure.intakeCommand());
   
   public void configureLimeLightKeys()
   {
-    LimeLightRunner runner = new LimeLightRunner(limelight, drivebase, () -> driverXbox.getLeftY());
+    LimeLightRunner runner = new LimeLightRunner(m_limelight, drivebase, () -> driverXbox.getLeftY());
     runner.execute();
   }
 
@@ -254,6 +256,15 @@ shooterXbox.b().whileTrue(m_superstructure.intakeCommand());
       
     }
 
+    configureLimelightBindings();
+
+  }
+
+  public void configureLimelightBindings()
+  {
+    driverXbox.rightBumper().whileTrue(
+      m_superstructure.limelightAlignCommand(drivebase)
+    );
   }
 
   /**
