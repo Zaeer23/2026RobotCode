@@ -67,13 +67,13 @@ public class IntakeSubsystem extends SubsystemBase {
   private final SmartMotorControllerConfig intakePivotSmartMotorConfig = new SmartMotorControllerConfig(this)
       .withControlMode(ControlMode.CLOSED_LOOP)
       .withClosedLoopController(25, 0, 0, DegreesPerSecond.of(360), DegreesPerSecondPerSecond.of(360))
-      .withFeedforward(new SimpleMotorFeedforward(0, 10, 0))
+      .withFeedforward(new SimpleMotorFeedforward(0, 0, 0))
       .withTelemetry("IntakePivotMotor", TelemetryVerbosity.HIGH)
       .withGearing(new MechanismGearing(GearBox.fromReductionStages(5, 5, 60.0 / 18.0)))
       .withMotorInverted(false)
       .withIdleMode(MotorMode.COAST)
       .withSoftLimit(Degrees.of(0), Degrees.of(150))
-      .withStatorCurrentLimit(Amps.of(10))
+      .withStatorCurrentLimit(Amps.of(30))
       .withClosedLoopRampRate(Seconds.of(0.1))
       .withOpenLoopRampRate(Seconds.of(0.1));
 
@@ -95,7 +95,9 @@ public class IntakeSubsystem extends SubsystemBase {
   private final Arm intakePivot = new Arm(intakePivotConfig);
 
    public Command setPercent(Supplier<Double> percentSupplier) {
-    return run(() -> rollerMotor.set(percentSupplier.get()));
+    return Commands.runOnce(() -> {}) // no requirement
+        .andThen(Commands.run(() -> rollerMotor.set(percentSupplier.get())))
+        .finallyDo(() -> rollerMotor.set(0));
 }
   public IntakeSubsystem() {
       // Configuration is handled by the YAMS SparkWrapper
@@ -136,8 +138,12 @@ public class IntakeSubsystem extends SubsystemBase {
     }).withName("Intake.BackFeedAndRoll");
   }
   public Command manualPivot(DoubleSupplier pSupplier) {
-    return Commands.run(() -> intakePivotController.setDutyCycle(pSupplier.getAsDouble()), this)
-        .finallyDo(() -> intakePivotController.setDutyCycle(0))
+    return Commands.run(() -> {
+        double input = pSupplier.getAsDouble();
+        double squared = Math.copySign(input * input, input);
+        pivotMotor.set(squared * 0.5); // cap at 50% to reduce aggression
+    }, this)
+        .finallyDo(() -> pivotMotor.set(0))
         .withName("IntakePivot.Manual");
 }
 

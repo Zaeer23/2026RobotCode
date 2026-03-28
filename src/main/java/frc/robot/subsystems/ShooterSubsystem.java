@@ -84,10 +84,10 @@ public class ShooterSubsystem extends SubsystemBase {
 }
 
 public Command setPercentAsRPM(Supplier<Double> percentSupplier) {
-    double maxRPM = 5600; // match your spinUp() value
+    double maxRPM = 5600;
     return shooter.setSpeed(
         () -> RPM.of(percentSupplier.get() * maxRPM)
-    ).finallyDo(() -> shooter.setSpeed(RPM.of(0)));
+    ).finallyDo(() -> leaderSpark.set(0));
 }
   public Command spinUp() {
     return setSpeed(RPM.of(5600));
