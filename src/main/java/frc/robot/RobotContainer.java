@@ -33,6 +33,7 @@ import frc.robot.subsystems.HoodSubsystem;
 import frc.robot.subsystems.ShooterSubsystem;
 import frc.robot.subsystems.TurretSubsystem;
 import frc.robot.subsystems.KickerSubsystem;
+import static edu.wpi.first.units.Units.Degrees;
 
 
 /**
@@ -121,6 +122,7 @@ private final ClimberSubsystem m_climber = new ClimberSubsystem();
 private final Superstructure m_superstructure = new Superstructure(
     m_shooter, m_turret, m_hood, m_intake, m_hopper, m_kicker
 );
+
   public RobotContainer()
   {
     // Configure the trigger bindings
@@ -144,8 +146,21 @@ private final Superstructure m_superstructure = new Superstructure(
         return Math.copySign(input * input, input);
     })
 );
-    
-    
+
+//  -------------------- AUTONOMOUS COMMANDS --------------------
+   NamedCommands.registerCommand("HungryHungryIntake",
+    Commands.parallel(
+        m_superstructure.intakeCommand()
+    )
+);
+NamedCommands.registerCommand("DeployIntake",
+    Commands.parallel(
+        m_superstructure.setIntakePivotAngle(Degrees.of(115)),
+        m_superstructure.backFeedAllCommand()
+    )
+);
+
+// ------------------ END OF AUTONOMOUS COMMANDS --------------------
 
   m_intake.setDefaultCommand(
     m_intake.manualPivot(() -> shooterXbox.getLeftY())
