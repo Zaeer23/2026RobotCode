@@ -61,7 +61,7 @@ public class ShooterSubsystem extends SubsystemBase {
   private final FlyWheelConfig shooterConfig = new FlyWheelConfig(smc)
       .withDiameter(Inches.of(4))
       .withMass(Pounds.of(1))
-      .withUpperSoftLimit(RPM.of(4000))
+      .withUpperSoftLimit(RPM.of(5600))
       .withLowerSoftLimit(RPM.of(0))
       .withTelemetry("Shooter", TelemetryVerbosity.HIGH);
 
@@ -79,9 +79,16 @@ public class ShooterSubsystem extends SubsystemBase {
   }
 
   public Command setPercent(Supplier<Double> percentSupplier) {
-    return run(() -> leaderSpark.set(percentSupplier.get()));
+    return run(() -> leaderSpark.set(percentSupplier.get()))
+        .finallyDo(() -> leaderSpark.set(0)); // stops motor on release
 }
 
+public Command setPercentAsRPM(Supplier<Double> percentSupplier) {
+    double maxRPM = 5600; // match your spinUp() value
+    return shooter.setSpeed(
+        () -> RPM.of(percentSupplier.get() * maxRPM)
+    ).finallyDo(() -> shooter.setSpeed(RPM.of(0)));
+}
   public Command spinUp() {
     return setSpeed(RPM.of(5600));
   }
@@ -89,6 +96,7 @@ public class ShooterSubsystem extends SubsystemBase {
   public Command stop() {
     return setSpeed(RPM.of(0));
   }
+  
 
   public AngularVelocity getSpeed() {
     return shooter.getSpeed();

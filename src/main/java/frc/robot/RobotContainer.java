@@ -141,22 +141,26 @@ private final Superstructure m_superstructure = new Superstructure(
     m_superstructure.manualTurretControl(() -> {
         double input = shooterXbox.getRightX();
         if (Math.abs(input) < 0.1) return 0.0;
-        return Math.copySign(input * input, input); // squared input keeps sign
+        return Math.copySign(input * input, input);
     })
 );
     
     
 
-    m_intake.setDefaultCommand(
+  m_intake.setDefaultCommand(
     m_intake.manualPivot(() -> shooterXbox.getLeftY())
 );
+
+new Trigger(() -> Math.abs(shooterXbox.getLeftY()) > 0.05)
+    .whileTrue(m_hopper.backFeedCommand());
+    
     shooterXbox.rightBumper().whileTrue(m_climber.climbUpCommand());
     shooterXbox.leftBumper().whileTrue(m_climber.climbDownCommand());
 
 //got rid of pov buttons because they like to break too often, might fix later for more precise aiming if we dont get limelight in time.
        
     new Trigger(() -> shooterXbox.getRightTriggerAxis() > 0.05)
-    .whileTrue(m_superstructure.setShooterPercent(
+    .whileTrue(m_shooter.setPercentAsRPM(
         () -> shooterXbox.getRightTriggerAxis()
     ));
 shooterXbox.b().whileTrue(m_superstructure.intakeCommand());

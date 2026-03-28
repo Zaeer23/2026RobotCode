@@ -17,6 +17,7 @@ import static edu.wpi.first.units.Units.RPM;
 import static edu.wpi.first.units.Units.Seconds;
 
 import java.util.function.DoubleSupplier;
+import java.util.function.Supplier;
 
 import edu.wpi.first.units.measure.Angle;
 import edu.wpi.first.wpilibj2.command.Command;
@@ -70,7 +71,7 @@ public class IntakeSubsystem extends SubsystemBase {
       .withTelemetry("IntakePivotMotor", TelemetryVerbosity.HIGH)
       .withGearing(new MechanismGearing(GearBox.fromReductionStages(5, 5, 60.0 / 18.0)))
       .withMotorInverted(false)
-      .withIdleMode(MotorMode.BRAKE)
+      .withIdleMode(MotorMode.COAST)
       .withSoftLimit(Degrees.of(0), Degrees.of(150))
       .withStatorCurrentLimit(Amps.of(10))
       .withClosedLoopRampRate(Seconds.of(0.1))
@@ -93,6 +94,9 @@ public class IntakeSubsystem extends SubsystemBase {
 
   private final Arm intakePivot = new Arm(intakePivotConfig);
 
+   public Command setPercent(Supplier<Double> percentSupplier) {
+    return run(() -> rollerMotor.set(percentSupplier.get()));
+}
   public IntakeSubsystem() {
       // Configuration is handled by the YAMS SparkWrapper
   }
@@ -131,8 +135,8 @@ public class IntakeSubsystem extends SubsystemBase {
       setIntakeHold();
     }).withName("Intake.BackFeedAndRoll");
   }
-  public Command manualPivot(DoubleSupplier speed) {
-    return Commands.run(() -> intakePivotController.setDutyCycle(speed.getAsDouble()), this)
+  public Command manualPivot(DoubleSupplier pSupplier) {
+    return Commands.run(() -> intakePivotController.setDutyCycle(pSupplier.getAsDouble()), this)
         .finallyDo(() -> intakePivotController.setDutyCycle(0))
         .withName("IntakePivot.Manual");
 }

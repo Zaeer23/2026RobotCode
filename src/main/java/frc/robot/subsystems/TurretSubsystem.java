@@ -136,7 +136,7 @@ public Command manualSet(Supplier<Double> dutyCycleSupplier) {
         double rawInput = dutyCycleSupplier.get();
         double currentAngle = turret.getAngle().in(Degrees);
         double scaledOutput = applySoftLimitScaling(rawInput, currentAngle);
-        turret.set(scaledOutput); 
+        turret.set(scaledOutput).schedule();
     }).withName("turret.manualSet");
 }
 
