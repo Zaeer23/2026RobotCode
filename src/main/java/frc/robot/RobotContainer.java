@@ -137,9 +137,8 @@ private final Superstructure m_superstructure = new Superstructure(
 
   public void configureSubSystemKeys()
   {
-    shooterXbox.a().whileTrue(m_superstructure.kickerFeedCommand());
-    shooterXbox.x().whileTrue(m_superstructure.hopperFeedCommand());
-    shooterXbox.y().whileTrue(m_superstructure.hopperReverseCommand());
+    shooterXbox.a().whileTrue(m_superstructure.feedAllCommand());
+    
     m_turret.setDefaultCommand(
     m_superstructure.manualTurretControl(() -> {
         double input = shooterXbox.getRightX();
@@ -164,23 +163,25 @@ NamedCommands.registerCommand("DeployIntake",
 
 // ------------------ END OF AUTONOMOUS COMMANDS --------------------
 
-  m_intake.setDefaultCommand(
-    m_intake.manualPivot(() -> shooterXbox.getLeftY())
+  
+
+
+m_intake.setDefaultCommand(
+    m_intake.manualPivot(() -> -shooterXbox.getLeftY())
 );
 
 new Trigger(() -> Math.abs(shooterXbox.getLeftY()) > 0.05)
-    .whileTrue(m_hopper.backFeedCommand());
-    
+    .whileTrue(m_intake.setPercent(() -> -1.0)); // runs roller only, no subsystem conflict
     shooterXbox.rightBumper().whileTrue(m_climber.climbUpCommand());
     shooterXbox.leftBumper().whileTrue(m_climber.climbDownCommand());
 
 //got rid of pov buttons because they like to break too often, might fix later for more precise aiming if we dont get limelight in time.
        
-    new Trigger(() -> shooterXbox.getRightTriggerAxis() > 0.05)
+    new Trigger(() -> shooterXbox.getRightTriggerAxis() > 0.10)
     .whileTrue(m_shooter.setPercentAsRPM(
         () -> shooterXbox.getRightTriggerAxis()
     ));
-shooterXbox.b().whileTrue(m_superstructure.intakeCommand());
+shooterXbox.b().whileTrue(m_intake.intakeCommand());
 
     }
   

@@ -162,4 +162,13 @@ public double getAlignOmega() {
         .withName("LimeLight.align");
   }
 
+  public static void setupPortForwardingUSB(int usbIndex) {
+        String ip = "172.29." + usbIndex + ".1";
+        int basePort = 5800 + (usbIndex * 10);
+
+        for (int i = 0; i < 10; i++) {
+            PortForwarder.add(basePort + i, ip, 5800 + i);
+        }
+    }
+
 }
