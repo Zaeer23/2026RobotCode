@@ -129,6 +129,12 @@ public class Superstructure extends SubsystemBase {
         .withName("Superstructure.aimDynamic");
   }
 
+  // shooting, manual/limelight stuff
+
+  
+
+
+
   /**
    * Waits until the superstructure is ready to shoot.
    */
@@ -244,6 +250,10 @@ public Command manualTurretControl(Supplier<Double> speedSupplier) {
   public Command limelightAlignCommand(SwerveSubsystem drivebase) {
     return limelight.alignCommand(drivebase).withName("Superstructure.limelightAlign");
   }
+
+
+
+
 
   public Command feedAllCommand() {
     return Commands.parallel(
@@ -365,6 +375,8 @@ public Command setShooterPercent(Supplier<Double> percentSupplier) {
   {
     return limelight.getTY();
   }
+
+
 
 
 }

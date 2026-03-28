@@ -4,6 +4,7 @@ import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.math.geometry.Rotation3d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.geometry.Translation3d;
+import edu.wpi.first.net.PortForwarder;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import frc.robot.subsystems.swervedrive.SwerveSubsystem;
@@ -138,6 +139,15 @@ public double getAlignOmega() {
     }
 
   // commands
+
+  public static void setupPortForwardingUSB(int usbIndex) {
+        String ip = "172.29." + usbIndex + ".1";
+        int basePort = 5800 + (usbIndex * 10);
+
+        for (int i = 0; i < 10; i++) {
+            PortForwarder.add(basePort + i, ip, 5800 + i);
+        }
+    }
 
   public Command alignCommand(SwerveSubsystem drivebase) {
     return Commands.run(

@@ -100,5 +100,11 @@ public final class Constants
 
       // skew coefficient, we probably won't use this, it's always gonna be 1.
       public static final double skewCoefficient = 1.000;
+
+
+      // competition april tag types
+
+      
+
     }
 }

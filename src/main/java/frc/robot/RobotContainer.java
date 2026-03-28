@@ -260,6 +260,7 @@ shooterXbox.b().whileTrue(m_superstructure.intakeCommand());
 
   }
 
+  // right now it's manual but plan to automate it
   public void configureLimelightBindings()
   {
     driverXbox.rightBumper().whileTrue(

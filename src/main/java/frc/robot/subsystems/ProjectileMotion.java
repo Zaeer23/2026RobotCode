@@ -87,7 +87,7 @@ public class ProjectileMotion {
         public final double turretAngleDegrees;
         public final double launchAngleDegrees;
         public final double launchSpeedMetersPerSecond;
-        public final double horizontaldistanceMeters;
+        public final double horizontalDistanceMeters;
 
         // approximate flywheel rpm assuming 4-inch radiius wheel
         public final double estimatedFlywheelRPM;
@@ -98,7 +98,7 @@ public class ProjectileMotion {
             this.turretAngleDegrees                 = turretDeg;
             this.launchAngleDegrees                  = launchDeg;
             this.launchSpeedMetersPerSecond          = speedMps;
-            this.horizontaldistanceMeters            = distM;
+            this.horizontalDistanceMeters            = distM;
 
             double wheelRadius = Units.inchesToMeters(4.0) / 2.0;
             this.estimatedFlywheelRPM                = valid ? (speedMps / wheelRadius) * (60.0 / (2.0 * Math.PI)) : 0.0;
@@ -116,7 +116,7 @@ public class ProjectileMotion {
             return String.format(
                 "ShotSolution[turret=%.1f° | launch=%.1f° | speed=%.2f m/s | dist=%.2f m | ~%.0f RPM | %s]",
                 turretAngleDegrees, launchAngleDegrees, launchSpeedMetersPerSecond,
-                horizontaldistanceMeters, estimatedFlywheelRPM, message);
+                horizontalDistanceMeters, estimatedFlywheelRPM, message);
         }
 
     }
@@ -300,7 +300,7 @@ public class ProjectileMotion {
 
         if (vx < 1e-6) return 0.0;
 
-        return sol.horizontaldistanceMeters / vx;
+        return sol.horizontalDistanceMeters / vx;
     }
 
 
