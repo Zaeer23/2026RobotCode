@@ -24,6 +24,11 @@ public class LimeLight {
   public static double ALIGN_MAX_OMEGA_RAD_S = 1.5;
   public static double ALIGN_TOLERANCE_DEGREES = 1.0;
 
+  // Physical offset of the limelight lens from the robot's true center (inches).
+  // Positive = limelight is to the RIGHT of center when viewed from above.
+  // Measure from center of robot to center of limelight lens, left/right axis only.
+  public static final double LIMELIGHT_LATERAL_OFFSET_INCHES = 9.0; // tune: measure physically
+
     private final NetworkTable table;
 
     public LimeLight(String name) {
@@ -128,13 +133,31 @@ public class LimeLight {
   }
 
   public boolean isCentered() {
-        return hasTarget() && Math.abs(getTX()) < ALIGN_TOLERANCE_DEGREES;
+        return hasTarget() && Math.abs(getCorrectedTX()) < ALIGN_TOLERANCE_DEGREES;
   }
 
-public double getAlignOmega() {
+  /**
+   * Returns TX corrected for the limelight's lateral offset from robot center.
+   * When correctedTX == 0, the robot center (not the limelight) is aimed at the target.
+   *
+   * correctedTX = tx - atan2(lateralOffset, distance)
+   *
+   * The parallax term is always subtracted because the limelight is always
+   * to the right of robot center — it will always read slightly more rightward
+   * than a centered camera would, so we compensate by subtracting.
+   */
+  public double getCorrectedTX() {
+    if (!hasTarget()) return 0.0;
+    double distanceInches = getLimelightAprilDistance_BasedScales() * 39.37;
+    double parallax = Math.toDegrees(
+        Math.atan2(LIMELIGHT_LATERAL_OFFSET_INCHES, distanceInches));
+    return getTX() - parallax;
+  }
+
+  public double getAlignOmega() {
         if (!hasTarget()) return 0.0;
-        // TX positive = target right = need to rotate right = negative omega in WPILib convention
-        double omega = -getTX() * ALIGN_KP;
+        // Use corrected TX so we align robot center, not the limelight, to the target
+        double omega = -getCorrectedTX() * ALIGN_KP;
         return Math.max(-ALIGN_MAX_OMEGA_RAD_S, Math.min(ALIGN_MAX_OMEGA_RAD_S, omega));
     }
 
@@ -149,19 +172,25 @@ public double getAlignOmega() {
         }
     }
 
+  /**
+   * Spins the robot in place until robot center is aimed at the target.
+   * Uses getCorrectedTX() to account for limelight being offset from center.
+   * Bind this to a button in RobotContainer.
+   */
   public Command alignCommand(SwerveSubsystem drivebase) {
     return Commands.run(
             () -> drivebase.drive(
                 Translation2d.kZero,   // no translation — spin in place
-                getAlignOmega(),       // proportional rotation toward target
+                getAlignOmega(),       // proportional rotation toward corrected target
                 true                   // field-relative keeps heading stable
             ),
-            drivebase                  // requires drivebase — interrupts teleop drive
+            drivebase
         )
         .until(this::isCentered)
         .withName("LimeLight.align");
-        
+        //this should work now :)
   }
+
   public static class AprilTagScan {
     public final boolean hasTarget;
     public final int tagID;

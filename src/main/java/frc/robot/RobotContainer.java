@@ -33,6 +33,7 @@ import frc.robot.subsystems.HoodSubsystem;
 import frc.robot.subsystems.ShooterSubsystem;
 import frc.robot.subsystems.TurretSubsystem;
 import frc.robot.subsystems.KickerSubsystem;
+
 import static edu.wpi.first.units.Units.Degrees;
 
 
@@ -138,7 +139,7 @@ private final Superstructure m_superstructure = new Superstructure(
   public void configureSubSystemKeys()
   {
     shooterXbox.a().whileTrue(m_superstructure.feedAllCommand());
-    
+    driverXbox.y().whileTrue(m_limelight.alignCommand(drivebase));
     m_turret.setDefaultCommand(
     m_superstructure.manualTurretControl(() -> {
         double input = shooterXbox.getRightX();
@@ -258,7 +259,7 @@ shooterXbox.b().whileTrue(m_intake.intakeCommand());
     }
 
     configureLimelightBindings();
-
+      
   }
 
   // right now it's manual but plan to automate it

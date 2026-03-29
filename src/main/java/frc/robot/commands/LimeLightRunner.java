@@ -32,22 +32,19 @@ public class LimeLightRunner extends Command {
 
     @Override
     public void execute() {
-        //limelight.lightMode(4);
         if (!limelight.hasTarget()) {
-            //swerve.drive(new Translation2d(0,0),0.0,false);
             return;
         }
 
-        double turn = limelight.getTurnCorrection(TURN_kP);
+        // Use corrected TX so turning is relative to robot center, not limelight lens
+        double correctedTX = limelight.getCorrectedTX();
+        double turn = -correctedTX * TURN_kP;
 
         double autoForward = limelight.getForwardCorrection(DESIRED_AREA, DRIVE_kP);
-
         double joystickForward = forwardJoystick.getAsDouble();
-
         double finalForward = autoForward + joystickForward * 0.5;
 
-        // may need to adjust depending on SwerveSubsystem drive method
-        swerve.drive(new Translation2d(finalForward, 0),   turn,   true);
+        swerve.drive(new Translation2d(finalForward, 0), turn, true);
     }
 
     @Override
