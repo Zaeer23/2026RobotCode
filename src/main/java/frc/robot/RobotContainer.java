@@ -138,8 +138,11 @@ private final Superstructure m_superstructure = new Superstructure(
 
   public void configureSubSystemKeys()
   {
-    shooterXbox.a().whileTrue(m_superstructure.feedAllCommand());
+    shooterXbox.a().whileTrue(m_superstructure.hopperFeedCommand());
+    shooterXbox.y().whileTrue(m_turret.trackTarget(m_limelight, drivebase));
     driverXbox.y().whileTrue(m_limelight.alignCommand(drivebase));
+    shooterXbox.povDown().whileTrue(m_superstructure.kickerFeedCommand());
+    
     m_turret.setDefaultCommand(
     m_superstructure.manualTurretControl(() -> {
         double input = shooterXbox.getRightX();
@@ -164,16 +167,15 @@ NamedCommands.registerCommand("DeployIntake",
 
 // ------------------ END OF AUTONOMOUS COMMANDS --------------------
 
-  
-
-shooterXbox.y().whileTrue(m_turret.trackTarget(m_limelight));
 m_intake.setDefaultCommand(
-    m_intake.manualPivot(() -> -shooterXbox.getLeftY())
+    m_intake.manualPivot(() -> 
+    shooterXbox.getLeftY())
 );
+    shooterXbox.x().whileTrue(m_hopper.backFeedCommand());
 
-new Trigger(() -> Math.abs(shooterXbox.getLeftY()) > 0.05)
-    .whileTrue(m_intake.setPercent(() -> -1.0)); // runs roller only, no subsystem conflict
-    shooterXbox.rightBumper().whileTrue(m_climber.climbUpCommand());
+    shooterXbox.rightBumper().whileTrue(
+    m_shooter.setSpeedFromLimelight(m_limelight, 45.0)
+);
     shooterXbox.leftBumper().whileTrue(m_climber.climbDownCommand());
 
 //got rid of pov buttons because they like to break too often, might fix later for more precise aiming if we dont get limelight in time.
@@ -202,13 +204,17 @@ shooterXbox.b().whileTrue(m_intake.intakeCommand());
   private void configureBindings()
   {
     Command driveFieldOrientedAnglularVelocity = drivebase.driveFieldOriented(driveAngularVelocity);
+    Command driveRobotRelativeAngularVelocity = Commands.run(
+        () -> drivebase.drive(driveRobotOriented.get()),
+        drivebase);
     Command driveFieldOrientedDirectAngleKeyboard      = drivebase.driveFieldOriented(driveDirectAngleKeyboard);
     if (RobotBase.isSimulation())
     {
       drivebase.setDefaultCommand(driveFieldOrientedDirectAngleKeyboard);
     } else
     {
-      drivebase.setDefaultCommand(driveFieldOrientedAnglularVelocity);
+      // Without reliable absolute module references, robot-oriented driving is the safer default.
+      drivebase.setDefaultCommand(driveRobotRelativeAngularVelocity);
     }
 
     if (Robot.isSimulation())
@@ -250,7 +256,8 @@ shooterXbox.b().whileTrue(m_intake.intakeCommand());
       driverXbox.rightBumper().onTrue(Commands.none());
     } else
     {
-      driverXbox.a().onTrue((Commands.runOnce(drivebase::zeroGyro)));
+      driverXbox.a().onTrue((Commands.runOnce(drivebase::zeroGyroWithAlliance)));
+      driverXbox.rightStick().whileTrue(driveFieldOrientedAnglularVelocity);
       driverXbox.x().onTrue(Commands.runOnce(drivebase::addFakeVisionReading));
       driverXbox.start().whileTrue(Commands.none());
       driverXbox.back().whileTrue(Commands.none());

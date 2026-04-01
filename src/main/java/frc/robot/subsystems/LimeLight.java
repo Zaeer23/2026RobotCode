@@ -9,6 +9,7 @@ import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import frc.robot.subsystems.swervedrive.SwerveSubsystem;
 import edu.wpi.first.networktables.NetworkTable;
+import edu.wpi.first.networktables.NetworkTableEntry;
 import edu.wpi.first.networktables.NetworkTableInstance;
 
 /*
@@ -29,36 +30,66 @@ public class LimeLight {
   // Measure from center of robot to center of limelight lens, left/right axis only.
   public static final double LIMELIGHT_LATERAL_OFFSET_INCHES = 9.0; // tune: measure physically
 
+    private static final double APRILTAG_DISTANCE_SCALE = 4202.278;
+
     private final NetworkTable table;
+    private final NetworkTableEntry tvEntry;
+    private final NetworkTableEntry txEntry;
+    private final NetworkTableEntry tyEntry;
+    private final NetworkTableEntry taEntry;
+    private final NetworkTableEntry tidEntry;
+    private final NetworkTableEntry tlEntry;
+    private final NetworkTableEntry clEntry;
+    private final NetworkTableEntry ledModeEntry;
 
     public LimeLight(String name) {
         table = NetworkTableInstance.getDefault().getTable(name);
+        tvEntry = table.getEntry("tv");
+        txEntry = table.getEntry("tx");
+        tyEntry = table.getEntry("ty");
+        taEntry = table.getEntry("ta");
+        tidEntry = table.getEntry("tid");
+        tlEntry = table.getEntry("tl");
+        clEntry = table.getEntry("cl");
+        ledModeEntry = table.getEntry("ledMode");
     }
 
     //some bic data access thingymabobies
 
     public boolean hasTarget() {
-        return table.getEntry("tv").getDouble(0) == 1;
+        return tvEntry.getDouble(0) == 1;
     }
 
     public double getTX() {
-        return table.getEntry("tx").getDouble(0);
+        return txEntry.getDouble(0);
     }
 
     public double getTY() {
-        return table.getEntry("ty").getDouble(0);
+        return tyEntry.getDouble(0);
     }
 
     public double getTA() {
-        return table.getEntry("ta").getDouble(0);
+        return taEntry.getDouble(0);
     }
 
     public int getTagID() {
-        return (int) table.getEntry("tid").getDouble(-1);
+        return (int) tidEntry.getDouble(-1);
     }
 
     public void lightMode(int number) {
-        table.getEntry("ledMode").setNumber(number);
+        ledModeEntry.setNumber(number);
+    }
+
+    public double getPipelineLatencyMs() {
+        return tlEntry.getDouble(0.0);
+    }
+
+    public double getCaptureLatencyMs() {
+        return clEntry.getDouble(0.0);
+    }
+
+    public double getTotalLatencyMs() {
+        return getPipelineLatencyMs() + getCaptureLatencyMs();
     }
     // this is just optional helpers
 
@@ -89,25 +120,31 @@ public class LimeLight {
 
   public double getLimelightAprilDistance_BasedScales()
   {
-    double givenScale = 4202.278; //30665.9;
-    double limelightScale = getTA();
+    return calculateDistanceFromArea(getTA());
+  }
 
-    return givenScale / limelightScale;
+  private double calculateDistanceFromArea(double area) {
+    if (area <= 1e-6) {
+      return 0.0;
+    }
+    return APRILTAG_DISTANCE_SCALE / area;
   }
 
   // this is locally to what the camera is seeing
   public Pose3d getLimelightPose3d()
   {
-    double distance = getLimelightAprilDistance_BasedScales();
+    return calculatePoseFromAngles(getTX(), getTY(), getLimelightAprilDistance_BasedScales());
+  }
 
-    double tx = Math.toRadians(getTX());
-    double ty = Math.toRadians(getTY());
+  private Pose3d calculatePoseFromAngles(double txDegrees, double tyDegrees, double distance) {
+    double tx = Math.toRadians(txDegrees);
+    double ty = Math.toRadians(tyDegrees);
 
     double x = distance * Math.sin(tx);
     double y = distance * Math.sin(ty);
     double z = distance * Math.cos(ty);
 
-    return new Pose3d(new Translation3d(x, y, z), new Rotation3d()); //we don't need to know the rotation
+    return new Pose3d(new Translation3d(x, y, z), new Rotation3d());
   }
 
 
@@ -172,6 +209,20 @@ public class LimeLight {
         }
     }
 
+  public static void setupPortForwardingRobotWifi(String host) {
+        setupPortForwarding(host, 5800);
+    }
+
+  public static void setupPortForwardingRobotWifi() {
+        setupPortForwarding("limelight.local", 5800);
+    }
+
+  private static void setupPortForwarding(String host, int basePort) {
+        for (int i = 0; i < 10; i++) {
+            PortForwarder.add(basePort + i, host, 5800 + i);
+        }
+    }
+
   /**
    * Spins the robot in place until robot center is aimed at the target.
    * Uses getCorrectedTX() to account for limelight being offset from center.
@@ -197,14 +248,17 @@ public class LimeLight {
     public final double tx;
     public final double ty;
     public final double distance;
+    public final double latencyMs;
     public final Pose3d pose;
 
-    public AprilTagScan(boolean hasTarget, int tagID, double tx, double ty, double distance, Pose3d pose) {
+    public AprilTagScan(boolean hasTarget, int tagID, double tx, double ty, double distance,
+        double latencyMs, Pose3d pose) {
         this.hasTarget = hasTarget;
         this.tagID = tagID;
         this.tx = tx;
         this.ty = ty;
         this.distance = distance;
+        this.latencyMs = latencyMs;
         this.pose = pose;
     }
 
@@ -214,14 +268,23 @@ public class LimeLight {
 }
 
 public AprilTagScan scan() {
-    boolean target = hasTarget();
+    boolean target = tvEntry.getDouble(0) == 1;
+    double tx = txEntry.getDouble(0);
+    double ty = tyEntry.getDouble(0);
+    double ta = taEntry.getDouble(0);
+    int tagId = (int) tidEntry.getDouble(-1);
+    double distance = target ? calculateDistanceFromArea(ta) : 0.0;
+    double latencyMs = tlEntry.getDouble(0.0) + clEntry.getDouble(0.0);
+    Pose3d pose = (target && distance > 0.0) ? calculatePoseFromAngles(tx, ty, distance) : new Pose3d();
+
     return new AprilTagScan(
         target,
-        getTagID(),
-        getTX(),
-        getTY(),
-        target ? getLimelightAprilDistance_BasedScales() : 0.0,
-        target ? getLimelightPose3d() : new Pose3d()
+        tagId,
+        tx,
+        ty,
+        distance,
+        latencyMs,
+        pose
     );
     
 }

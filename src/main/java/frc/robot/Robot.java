@@ -56,6 +56,7 @@ public class Robot extends TimedRobot
     disabledTimer = new Timer();
 
     LimeLight.setupPortForwardingUSB(0);
+    LimeLight.setupPortForwardingRobotWifi();
 
     if (isSimulation())
     {

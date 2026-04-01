@@ -21,21 +21,19 @@ import java.util.Map;
 import static edu.wpi.first.units.Units.Degrees;
 import static edu.wpi.first.units.Units.RPM;
 
-//ShuffleboardManager — centralized pre-match and in-match telemetry dashboard.
+/**
+ * ShuffleboardManager — centralized pre-match and in-match telemetry dashboard.
+ */
 public class ShuffleboardManager {
 
     // References
-
     private final LimeLight      limelight;
     private final Superstructure superstructure;
     private final SwerveSubsystem drivebase;
+    private final TurretSubsystem turret; // Added reference for diagnostics
 
     // Field widget (shared across tabs)
-
     private final Field2d field = new Field2d();
-
-    // Cached network table entries — write once per update() call.
-    // Using GenericEntry avoids repeated tab/layout lookups every loop.
 
     // Pre-Match tab
     private final SimpleWidget entryAlliance;
@@ -64,6 +62,10 @@ public class ShuffleboardManager {
     private final SimpleWidget entryReadyToShoot;
     private final SimpleWidget entryHoodAngleDeg;
 
+    // Turret Diagnostics (New)
+    private final SimpleWidget entryTurretRawRotations;
+    private final SimpleWidget entryTurretYAMSAngle;
+
     // Drive tab
     private final SimpleWidget entryRobotX;
     private final SimpleWidget entryRobotY;
@@ -72,294 +74,149 @@ public class ShuffleboardManager {
     private final SimpleWidget entryVelocityY;
     private final SimpleWidget entryTotalSpeed;
 
-    // Constructor — builds all tabs and widgets once at startup
-
     public ShuffleboardManager(
             LimeLight limelight,
             Superstructure superstructure,
-            SwerveSubsystem drivebase) {
+            SwerveSubsystem drivebase,
+            TurretSubsystem turret) {
 
         this.limelight      = limelight;
         this.superstructure = superstructure;
         this.drivebase      = drivebase;
+        this.turret         = turret;
 
 
-        //  Pre-Match Safety Checklist
+        // --- TAB 1: PRE-MATCH SAFETY CHECKLIST ---
         ShuffleboardTab preMatch = Shuffleboard.getTab("Pre-Match");
 
-        // Status column (left) 
         ShuffleboardLayout statusLayout = preMatch
                 .getLayout("Station & Alliance", BuiltInLayouts.kList)
                 .withPosition(0, 0)
                 .withSize(2, 4)
                 .withProperties(Map.of("Label position", "LEFT"));
 
-        entryAlliance = statusLayout
-                .add("Alliance", "Unknown")
-                .withWidget(BuiltInWidgets.kTextView);
+        entryAlliance = statusLayout.add("Alliance", "Unknown");
+        entryDriverStation = statusLayout.add("DS Number", -1);
+        entryFMSConnected = statusLayout.add("FMS Connected", false).withWidget(BuiltInWidgets.kBooleanBox);
 
-        entryDriverStation = statusLayout
-                .add("DS Number", -1)
-                .withWidget(BuiltInWidgets.kTextView);
-
-        entryFMSConnected = statusLayout
-                .add("FMS Connected", false)
-                .withWidget(BuiltInWidgets.kBooleanBox)
-                .withProperties(Map.of("Color when true", "green", "Color when false", "gray"));
-
-        // Subsystem readiness column (middle)
         ShuffleboardLayout subsysLayout = preMatch
                 .getLayout("Subsystem Readiness", BuiltInLayouts.kList)
                 .withPosition(2, 0)
                 .withSize(2, 5)
                 .withProperties(Map.of("Label position", "LEFT"));
 
-        entryShooterOk = subsysLayout
-                .add("Shooter Motor OK", false)
-                .withWidget(BuiltInWidgets.kBooleanBox)
-                .withProperties(Map.of("Color when true", "green", "Color when false", "red"));
+        entryShooterOk = subsysLayout.add("Shooter Motor OK", false).withWidget(BuiltInWidgets.kBooleanBox);
+        entryTurretOk = subsysLayout.add("Turret Motor OK", false).withWidget(BuiltInWidgets.kBooleanBox);
+        entryLimelightConnected = subsysLayout.add("Limelight Connected", false).withWidget(BuiltInWidgets.kBooleanBox);
+        entryOdometryOk = subsysLayout.add("Odometry Valid", false).withWidget(BuiltInWidgets.kBooleanBox);
 
-        entryTurretOk = subsysLayout
-                .add("Turret Motor OK", false)
-                .withWidget(BuiltInWidgets.kBooleanBox)
-                .withProperties(Map.of("Color when true", "green", "Color when false", "red"));
+        entryTurretActualDeg = preMatch.add("Turret Angle (deg)", 0.0).withWidget(BuiltInWidgets.kDial)
+                .withPosition(4, 0).withSize(2, 2).withProperties(Map.of("Min", -90.0, "Max", 90.0, "Show value", true));
 
-        entryLimelightConnected = subsysLayout
-                .add("Limelight Connected", false)
-                .withWidget(BuiltInWidgets.kBooleanBox)
-                .withProperties(Map.of("Color when true", "green", "Color when false", "red"));
+        entryShooterActualRPM = preMatch.add("Shooter RPM", 0.0).withWidget(BuiltInWidgets.kNumberBar)
+                .withPosition(4, 2).withSize(2, 1).withProperties(Map.of("Min", 0.0, "Max", 6000.0));
 
-        entryOdometryOk = subsysLayout
-                .add("Odometry Valid", false)
-                .withWidget(BuiltInWidgets.kBooleanBox)
-                .withProperties(Map.of("Color when true", "green", "Color when false", "yellow"));
+        entryHoodAngleDeg = preMatch.add("Hood Angle (deg)", 0.0).withPosition(4, 3).withSize(2, 1);
 
-        // Turret angle dial (right — visual sanity check)
-        entryTurretActualDeg = preMatch
-                .add("Turret Angle (deg)", 0.0)
-                .withWidget(BuiltInWidgets.kDial)
-                .withPosition(4, 0)
-                .withSize(2, 2)
-                .withProperties(Map.of("Min", -90.0, "Max", 90.0, "Show value", true));
 
-        // Shooter RPM bar
-        entryShooterActualRPM = preMatch
-                .add("Shooter RPM", 0.0)
-                .withWidget(BuiltInWidgets.kNumberBar)
-                .withPosition(4, 2)
-                .withSize(2, 1)
-                .withProperties(Map.of("Min", 0.0, "Max", 6000.0, "Num tick marks", 7));
-
-        // Hood angle
-        entryHoodAngleDeg = preMatch
-                .add("Hood Angle (deg)", 0.0)
-                .withWidget(BuiltInWidgets.kTextView)
-                .withPosition(4, 3)
-                .withSize(2, 1);
-
-        // Shooting / Vision
+        // --- TAB 2: SHOOTING / VISION ---
         ShuffleboardTab shootingTab = Shuffleboard.getTab("Shooting");
 
-        // Limelight block
         ShuffleboardLayout llLayout = shootingTab
                 .getLayout("Limelight", BuiltInLayouts.kGrid)
-                .withPosition(0, 0)
-                .withSize(3, 4)
+                .withPosition(0, 0).withSize(3, 4)
                 .withProperties(Map.of("Number of columns", 2, "Number of rows", 4));
 
-        entryLLHasTarget = llLayout
-                .add("Has Target", false)
-                .withWidget(BuiltInWidgets.kBooleanBox)
-                .withProperties(Map.of("Color when true", "lime", "Color when false", "red"));
+        entryLLHasTarget = llLayout.add("Has Target", false).withWidget(BuiltInWidgets.kBooleanBox);
+        entryLLTargetCount = llLayout.add("Target Count", 0);
+        entryLLTX = llLayout.add("TX (horiz °)", 0.0);
+        entryLLTY = llLayout.add("TY (vert °)", 0.0);
+        entryLLDistance = llLayout.add("Distance (m)", 0.0);
+        entryLLTagID = llLayout.add("AprilTag ID", -1);
 
-        entryLLTargetCount = llLayout
-                .add("Target Count", 0)
-                .withWidget(BuiltInWidgets.kTextView);
+        // New Diagnostics Section (Tidying up the layout)
+        ShuffleboardLayout turretDiag = shootingTab
+                .getLayout("Turret Hardware", BuiltInLayouts.kList)
+                .withPosition(6, 0).withSize(2, 4);
 
-        entryLLTX = llLayout
-                .add("TX (horiz °)", 0.0)
-                .withWidget(BuiltInWidgets.kTextView);
+        entryTurretRawRotations = turretDiag.add("Raw Encoder Rot", 0.0);
+        entryTurretYAMSAngle    = turretDiag.add("YAMS Deg", 0.0);
 
-        entryLLTY = llLayout
-                .add("TY (vert °)", 0.0)
-                .withWidget(BuiltInWidgets.kTextView);
-
-        entryLLDistance = llLayout
-                .add("Distance (m)", 0.0)
-                .withWidget(BuiltInWidgets.kTextView);
-
-        entryLLTagID = llLayout
-                .add("AprilTag ID", -1)
-                .withWidget(BuiltInWidgets.kTextView);
-
-        // Shot solution block
         ShuffleboardLayout shotLayout = shootingTab
                 .getLayout("Shot Solution", BuiltInLayouts.kGrid)
-                .withPosition(3, 0)
-                .withSize(3, 4)
+                .withPosition(3, 0).withSize(3, 4)
                 .withProperties(Map.of("Number of columns", 2, "Number of rows", 4));
 
-        entryShotValid = shotLayout
-                .add("Solution Valid", false)
-                .withWidget(BuiltInWidgets.kBooleanBox)
-                .withProperties(Map.of("Color when true", "green", "Color when false", "red"));
+        entryShotValid = shotLayout.add("Solution Valid", false).withWidget(BuiltInWidgets.kBooleanBox);
+        entryReadyToShoot = shotLayout.add("Ready to Shoot", false).withWidget(BuiltInWidgets.kBooleanBox);
+        entryShotTurretDeg = shotLayout.add("Turret Cmd (°)", 0.0);
+        entryShotLaunchDeg = shotLayout.add("Launch Angle (°)", 0.0);
+        entryShotDistM = shotLayout.add("Calc Distance (m)", 0.0);
+        entryShotRPM = shotLayout.add("Target RPM", 0.0);
 
-        entryReadyToShoot = shotLayout
-                .add("Ready to Shoot", false)
-                .withWidget(BuiltInWidgets.kBooleanBox)
-                .withProperties(Map.of("Color when true", "lime", "Color when false", "gray"));
+        entryShotMessage = shootingTab.add("Solver Message", "No solution yet")
+                .withPosition(0, 4).withSize(6, 1);
 
-        entryShotTurretDeg = shotLayout
-                .add("Turret Cmd (°)", 0.0)
-                .withWidget(BuiltInWidgets.kTextView);
 
-        entryShotLaunchDeg = shotLayout
-                .add("Launch Angle (°)", 0.0)
-                .withWidget(BuiltInWidgets.kTextView);
-
-        entryShotDistM = shotLayout
-                .add("Calc Distance (m)", 0.0)
-                .withWidget(BuiltInWidgets.kTextView);
-
-        entryShotRPM = shotLayout
-                .add("Target RPM", 0.0)
-                .withWidget(BuiltInWidgets.kTextView);
-
-        // Message bar (full width)
-        entryShotMessage = shootingTab
-                .add("Solver Message", "No solution yet")
-                .withWidget(BuiltInWidgets.kTextView)
-                .withPosition(0, 4)
-                .withSize(6, 1);
-
-        /*
-        // Live RPM number bar
-        entryShooterActualRPM = shootingTab
-                .add("Actual RPM", 0.0)
-                .withWidget(BuiltInWidgets.kNumberBar)
-                .withPosition(6, 0)
-                .withSize(2, 1)
-                .withProperties(Map.of("Min", 0.0, "Max", 6000.0));
-
-        // Turret dial
-        entryTurretActualDeg = shootingTab
-                .add("Actual Turret °", 0.0)
-                .withWidget(BuiltInWidgets.kDial)
-                .withPosition(6, 1)
-                .withSize(2, 2)
-                .withProperties(Map.of("Min", -90.0, "Max", 90.0, "Show value", true));
-        */
-        
-        //  TAB 3 — Drive / Odometry
+        // --- TAB 3: DRIVE / ODOMETRY ---
         ShuffleboardTab driveTab = Shuffleboard.getTab("Drive");
 
-        // Field2d map widget
-        driveTab.add("Field", field)
-                .withWidget(BuiltInWidgets.kField)
-                .withPosition(0, 0)
-                .withSize(5, 3);
+        driveTab.add("Field", field).withWidget(BuiltInWidgets.kField).withPosition(0, 0).withSize(5, 3);
 
-        // Pose numbers
         ShuffleboardLayout poseLayout = driveTab
                 .getLayout("Robot Pose", BuiltInLayouts.kList)
-                .withPosition(5, 0)
-                .withSize(2, 3)
+                .withPosition(5, 0).withSize(2, 3)
                 .withProperties(Map.of("Label position", "LEFT"));
 
-        entryRobotX = poseLayout
-                .add("X (m)", 0.0)
-                .withWidget(BuiltInWidgets.kTextView);
+        entryRobotX = poseLayout.add("X (m)", 0.0);
+        entryRobotY = poseLayout.add("Y (m)", 0.0);
+        entryRobotHeading = poseLayout.add("Heading (°)", 0.0);
 
-        entryRobotY = poseLayout
-                .add("Y (m)", 0.0)
-                .withWidget(BuiltInWidgets.kTextView);
-
-        entryRobotHeading = poseLayout
-                .add("Heading (°)", 0.0)
-                .withWidget(BuiltInWidgets.kTextView);
-
-        // Velocity
         ShuffleboardLayout velLayout = driveTab
                 .getLayout("Velocity", BuiltInLayouts.kList)
                 .withPosition(5, 3)
                 .withSize(2, 3)
                 .withProperties(Map.of("Label position", "LEFT"));
 
-        entryVelocityX = velLayout
-                .add("Vx (m/s)", 0.0)
-                .withWidget(BuiltInWidgets.kTextView);
-
-        entryVelocityY = velLayout
-                .add("Vy (m/s)", 0.0)
-                .withWidget(BuiltInWidgets.kTextView);
-
-        entryTotalSpeed = velLayout
-                .add("Speed (m/s)", 0.0)
-                .withWidget(BuiltInWidgets.kNumberBar)
-                .withProperties(Map.of("Min", 0.0, "Max", 5.0));
+        entryVelocityX = velLayout.add("Vx (m/s)", 0.0);
+        entryVelocityY = velLayout.add("Vy (m/s)", 0.0);
+        entryTotalSpeed = velLayout.add("Speed (m/s)", 0.0).withWidget(BuiltInWidgets.kNumberBar).withProperties(Map.of("Min", 0.0, "Max", 5.0));
     }
 
-    //  update() — call this every robot periodic (50 Hz)
-
-    /**
-     * Refreshes all Shuffleboard widgets with current sensor and solver data.
-     * Call this once per robot periodic loop.
-     */
     public void update(ShotSolution activeSolution) {
-
-        //  Pre-Match tab
-
-        // Alliance
-        String allianceName = DriverStation.getAlliance()
-                .map(a -> a == DriverStation.Alliance.Red ? "RED" : "BLUE")
-                .orElse("Unknown");
-        entryAlliance.getEntry().setString(allianceName);
-
-        // DS station number (1–3)
+        // Pre-Match Logic
+        entryAlliance.getEntry().setString(DriverStation.getAlliance().map(a -> a == DriverStation.Alliance.Red ? "RED" : "BLUE").orElse("Unknown"));
         entryDriverStation.getEntry().setInteger(DriverStation.getLocation().orElse(-1));
-
-        // FMS
         entryFMSConnected.getEntry().setBoolean(DriverStation.isFMSAttached());
 
         double shooterRPM  = superstructure.getShooterSpeed().in(RPM);
         double turretDeg   = superstructure.getTurretAngle().in(Degrees);
         double hoodDeg     = superstructure.getHoodAngle().in(Degrees);
 
-        entryShooterOk.getEntry().setBoolean(shooterRPM >= 0); // always true if CAN comms live
+        // Hardware Diagnostics Update
+        entryTurretRawRotations.getEntry().setDouble(turret.getRawEncoderRotations());
+        entryTurretYAMSAngle.getEntry().setDouble(round1(turret.getRawAngle().in(Degrees)));
+
+        entryShooterOk.getEntry().setBoolean(shooterRPM >= 0);
         entryTurretOk.getEntry().setBoolean(!Double.isNaN(turretDeg));
+        entryLimelightConnected.getEntry().setBoolean(true); 
 
-        // Limelight connected = NetworkTables entry is fresh (tv == 0 or 1, not -1)
-        boolean llConnected = limelight.getTX() != 0.0 || limelight.hasTarget()
-                || limelight.getTagID() >= 0;
-                
-        entryLimelightConnected.getEntry().setBoolean(true); // NT entry exists = connected
-
-        // Odometry valid = pose is not at the field origin (0,0) which would indicate a reset or no localisation yet.
         Pose2d pose = drivebase.getPose();
-        boolean odometryOk = pose.getTranslation().getNorm() > 0.01;
-        entryOdometryOk.getEntry().setBoolean(odometryOk);
+        entryOdometryOk.getEntry().setBoolean(pose.getTranslation().getNorm() > 0.01);
 
         entryTurretActualDeg.getEntry().setDouble(round1(turretDeg));
         entryShooterActualRPM.getEntry().setDouble(round1(shooterRPM));
         entryHoodAngleDeg.getEntry().setDouble(round1(hoodDeg));
 
-                //  Shooting
-
-        // Limelight live data
+        // Shooting Logic
         boolean hasTarget = limelight.hasTarget();
         entryLLHasTarget.getEntry().setBoolean(hasTarget);
-
         entryLLTargetCount.getEntry().setInteger(hasTarget ? 1 : 0);
-
         entryLLTX.getEntry().setDouble(round2(limelight.getTX()));
         entryLLTY.getEntry().setDouble(round2(limelight.getTY()));
         entryLLTagID.getEntry().setInteger(limelight.getTagID());
+        entryLLDistance.getEntry().setDouble(round2(computeLLDistance()));
 
-        // Compute current limelight distance using the height formula
-        double llDist = computeLLDistance();
-        entryLLDistance.getEntry().setDouble(round2(llDist));
-
-        // Shot solution
         if (activeSolution != null) {
             entryShotValid.getEntry().setBoolean(activeSolution.valid);
             entryShotMessage.getEntry().setString(activeSolution.message);
@@ -380,48 +237,25 @@ public class ShuffleboardManager {
         boolean hoodReady    = Math.abs(hoodDeg - targetHood) < 2.0;
         entryReadyToShoot.getEntry().setBoolean(shooterReady && turretReady && hoodReady && hasTarget);
 
-        entryShooterActualRPM.getEntry().setDouble(round1(shooterRPM));
-        entryTurretActualDeg.getEntry().setDouble(round1(turretDeg));
-
-        //  Drive tab
-
+        // Drive Logic
         field.setRobotPose(pose);
-
         entryRobotX.getEntry().setDouble(round2(pose.getX()));
         entryRobotY.getEntry().setDouble(round2(pose.getY()));
         entryRobotHeading.getEntry().setDouble(round1(pose.getRotation().getDegrees()));
 
         ChassisSpeeds speeds = drivebase.getFieldVelocity();
-        double vx    = speeds.vxMetersPerSecond;
-        double vy    = speeds.vyMetersPerSecond;
-        double total = Math.hypot(vx, vy);
-
-        entryVelocityX.getEntry().setDouble(round2(vx));
-        entryVelocityY.getEntry().setDouble(round2(vy));
-        entryTotalSpeed.getEntry().setDouble(round2(total));
+        entryVelocityX.getEntry().setDouble(round2(speeds.vxMetersPerSecond));
+        entryVelocityY.getEntry().setDouble(round2(speeds.vyMetersPerSecond));
+        entryTotalSpeed.getEntry().setDouble(round2(Math.hypot(speeds.vxMetersPerSecond, speeds.vyMetersPerSecond)));
     }
 
-    //Convenience overload — call with no solution when no shooting mode is active.
+    public void update() { update(null); }
 
-    public void update() {
-        update(null);
-    }
-
-    //  Utility
-
-    /**
-     * Computes limelight-to-hub distance using the height formula.
-     * Returns 0.0 if no target is visible or angle is degenerate.
-     */
     private double computeLLDistance() {
         if (!limelight.hasTarget()) return 0.0;
-        double totalAngleRad = Math.toRadians(
-                ProjectileMotion.LIMELIGHT_MOUNT_ANGLE_DEGREES + limelight.getTY());
+        double totalAngleRad = Math.toRadians(ProjectileMotion.LIMELIGHT_MOUNT_ANGLE_DEGREES + limelight.getTY());
         if (Math.abs(totalAngleRad) < 1e-6) return 0.0;
-        double dist = (ProjectileMotion.HUB_APRILTAG_HEIGHT_METERS
-                - ProjectileMotion.LIMELIGHT_MOUNT_HEIGHT_METERS)
-                / Math.tan(totalAngleRad);
-        return Math.max(0.0, dist);
+        return Math.max(0.0, (ProjectileMotion.HUB_APRILTAG_HEIGHT_METERS - ProjectileMotion.LIMELIGHT_MOUNT_HEIGHT_METERS) / Math.tan(totalAngleRad));
     }
 
     private double round1(double v) { return Math.round(v * 10.0) / 10.0; }

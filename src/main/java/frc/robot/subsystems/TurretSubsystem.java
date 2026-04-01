@@ -25,6 +25,7 @@ import edu.wpi.first.units.measure.Angle;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.Constants;
+import frc.robot.subsystems.swervedrive.SwerveSubsystem;
 import yams.gearing.GearBox;
 import yams.gearing.MechanismGearing;
 import yams.mechanisms.config.MechanismPositionConfig;
@@ -78,9 +79,26 @@ public class TurretSubsystem extends SubsystemBase {
   private static final double SLOW_ZONE_DEGREES = 20.0;
   
   // Tracking constants — tune kP if still oscillating/sluggish
-  private static final double TRACK_DEADBAND_DEGREES = 2.5;
-  private static final double TRACK_KP = 0.008;
-  private static final double TRACK_MAX_OUTPUT = 0.3;
+  private static final double TRACK_DEADBAND_DEGREES = 0.25;
+  private static final double TRACK_KP = 0.004;
+  private static final double TRACK_MAX_OUTPUT = 0.18;
+  private static final double TRACK_MIN_OUTPUT = 0.035;
+  private static final double TRACK_DAMPING_DEGREES = 12.0;
+  private static final double TRACK_TX_FILTER_ALPHA = 0.35;
+  private static final double TRACK_DISTANCE_FILTER_ALPHA = 0.20;
+  private static final double TRACK_MAX_TARGET_STEP_DEGREES = 4.0;
+  private static final double TRACK_MAX_TX_JUMP_DEGREES = 18.0;
+  private static final int TRACK_JUMP_HOLD_CYCLES = 3;
+  private static final double TRACK_LATENCY_FUDGE_MS = 20.0;
+
+  private double filteredTrackingTxDegrees = 0.0;
+  private double filteredTrackingDistanceInches = 120.0;
+  private double lastTrackingTargetAngleDegrees = 0.0;
+  private double lastRawTrackingTxDegrees = 0.0;
+  private boolean hasTrackingSample = false;
+  private int trackingJumpHoldCyclesRemaining = 0;
+
+
 
   public TurretSubsystem() {
   }
@@ -104,6 +122,9 @@ public class TurretSubsystem extends SubsystemBase {
   public Angle getRawAngle() {
     return turret.getAngle();
   }
+  public double getRawEncoderRotations() {
+    return spark.getEncoder().getPosition();
+}
 
   public Command set(double dutyCycle) {
     return turret.set(dutyCycle);
@@ -135,48 +156,95 @@ public class TurretSubsystem extends SubsystemBase {
    * on target distance, then P-control the turret toward corrected TX = 0.
    */
   public Command trackTarget(LimeLight limelight) {
-    return run(() -> {
+    return trackTarget(limelight, null);
+  }
+
+  public Command trackTarget(LimeLight limelight, SwerveSubsystem drivebase) {
+    return turret.setAngle(() -> {
       LimeLight.AprilTagScan scan = limelight.scan();
-      double currentAngle = turret.getAngle().in(Degrees);
+      double currentAngleDegrees = turret.getAngle().in(Degrees);
 
       if (!scan.isValid()) {
-        spark.set(0);
+        filteredTrackingTxDegrees = 0.0;
+        filteredTrackingDistanceInches = 120.0;
+        lastTrackingTargetAngleDegrees = currentAngleDegrees;
+        hasTrackingSample = false;
+        trackingJumpHoldCyclesRemaining = 0;
         Logger.recordOutput("Turret/TrackingState", "NO_TARGET");
-        return;
+        Logger.recordOutput("Turret/FilteredTX", filteredTrackingTxDegrees);
+        Logger.recordOutput("Turret/TrackingTargetAngleDegrees", currentAngleDegrees);
+        return turret.getAngle();
       }
 
-      // Parallax correction based on distance: closer targets need more correction
-      double distanceInches = scan.distance * 39.37;
-      double parallax = Math.toDegrees(
-          Math.atan2(LIMELIGHT_HORIZONTAL_OFFSET_INCHES, distanceInches));
+      double robotOmegaDegPerSecond = 0.0;
+      if (drivebase != null) {
+        robotOmegaDegPerSecond = Math.toDegrees(drivebase.getRobotVelocity().omegaRadiansPerSecond);
+      }
+      double visionLatencySeconds = (scan.latencyMs + TRACK_LATENCY_FUDGE_MS) / 1000.0;
+      double latencyCompensationDegrees = robotOmegaDegPerSecond * visionLatencySeconds;
+      double rawTxDegrees = -(scan.tx + latencyCompensationDegrees);
+      double rawDistanceInches = scan.distance * 39.37;
+      if (!hasTrackingSample) {
+        filteredTrackingTxDegrees = rawTxDegrees;
+        filteredTrackingDistanceInches = Math.max(rawDistanceInches, 1.0);
+        lastRawTrackingTxDegrees = rawTxDegrees;
+        hasTrackingSample = true;
+      }
 
-      // Always subtract — limelight is always to the right of turret center
-      double targetAngle = currentAngle + (scan.tx - parallax);
-      double correctedTX = scan.tx - parallax;
+      // Freeze briefly on unrealistic one-frame jumps instead of commanding a violent reversal.
+      double txDeltaDegrees = rawTxDegrees - lastRawTrackingTxDegrees;
+      if (Math.abs(txDeltaDegrees) > TRACK_MAX_TX_JUMP_DEGREES) {
+        trackingJumpHoldCyclesRemaining = TRACK_JUMP_HOLD_CYCLES;
+      } else if (trackingJumpHoldCyclesRemaining > 0) {
+        trackingJumpHoldCyclesRemaining--;
+      }
+      lastRawTrackingTxDegrees = rawTxDegrees;
+
+      if (trackingJumpHoldCyclesRemaining == 0) {
+        // Smooth the measured tag angle so noisy frames do not jerk the turret.
+        filteredTrackingTxDegrees +=
+            (rawTxDegrees - filteredTrackingTxDegrees) * TRACK_TX_FILTER_ALPHA;
+        filteredTrackingDistanceInches +=
+            (Math.max(rawDistanceInches, 1.0) - filteredTrackingDistanceInches) * TRACK_DISTANCE_FILTER_ALPHA;
+      }
+
+      if (Math.abs(filteredTrackingTxDegrees) < TRACK_DEADBAND_DEGREES) {
+        filteredTrackingTxDegrees = 0.0;
+      }
+
+      double parallaxDegrees = Math.toDegrees(
+          Math.atan2(LIMELIGHT_HORIZONTAL_OFFSET_INCHES, filteredTrackingDistanceInches));
+      double correctedTargetDegrees = filteredTrackingTxDegrees - parallaxDegrees;
+
+      // Rate limit the commanded turret angle so fast tag motion cannot cause
+      // full-speed reversals from one loop to the next.
+      double unclampedTargetAngleDegrees = MathUtil.clamp(
+          correctedTargetDegrees, -MAX_ONE_DIR_FOV, MAX_ONE_DIR_FOV);
+      double steppedTargetAngleDegrees = MathUtil.clamp(
+          unclampedTargetAngleDegrees,
+          lastTrackingTargetAngleDegrees - TRACK_MAX_TARGET_STEP_DEGREES,
+          lastTrackingTargetAngleDegrees + TRACK_MAX_TARGET_STEP_DEGREES);
+      double clampedTargetAngleDegrees = MathUtil.clamp(
+          steppedTargetAngleDegrees, -MAX_ONE_DIR_FOV, MAX_ONE_DIR_FOV);
+      lastTrackingTargetAngleDegrees = clampedTargetAngleDegrees;
 
       Logger.recordOutput("Turret/RawTX", scan.tx);
-      Logger.recordOutput("Turret/CorrectedTX", correctedTX);
-      Logger.recordOutput("Turret/ParallaxDeg", parallax);
+      Logger.recordOutput("Turret/VisionLatencyMs", scan.latencyMs);
+      Logger.recordOutput("Turret/RobotOmegaDegPerSec", robotOmegaDegPerSecond);
+      Logger.recordOutput("Turret/LatencyCompensationDegrees", latencyCompensationDegrees);
+      Logger.recordOutput("Turret/ClampedTX", rawTxDegrees);
+      Logger.recordOutput("Turret/FilteredTX", filteredTrackingTxDegrees);
+      Logger.recordOutput("Turret/FilteredDistanceInches", filteredTrackingDistanceInches);
+      Logger.recordOutput("Turret/ParallaxDegrees",   parallaxDegrees);
+      Logger.recordOutput("Turret/JumpHoldCycles", trackingJumpHoldCyclesRemaining);
       Logger.recordOutput("Turret/TargetDistanceM", scan.distance);
-
-      if (Math.abs(correctedTX) < TRACK_DEADBAND_DEGREES) {
-        spark.set(0);
-        Logger.recordOutput("Turret/TrackingState", "ON_TARGET");
-        return;
-      }
-
-      // Negative: positive TX = target is right = rotate right = positive spark output
-      // but check your motor inversion — flip sign here if turret goes wrong way
-      double output = -correctedTX * TRACK_KP;
-      output = MathUtil.clamp(output, -TRACK_MAX_OUTPUT, TRACK_MAX_OUTPUT);
-      output = applySoftLimitScaling(output, currentAngle);
-
+      Logger.recordOutput("Turret/TrackingTargetAngleDegrees", clampedTargetAngleDegrees);
       Logger.recordOutput("Turret/TrackingState", "TRACKING");
-      Logger.recordOutput("Turret/TrackingOutput", output);
 
-      spark.set(output);
+      return Degrees.of(clampedTargetAngleDegrees);
     }).withName("Turret.trackTarget");
   }
+
 
   private double applySoftLimitScaling(double input, double currentAngleDeg) {
     double distanceToPositiveLimit = MAX_ONE_DIR_FOV - currentAngleDeg;
@@ -193,16 +261,17 @@ public class TurretSubsystem extends SubsystemBase {
   }
 
   @Override
-  public void periodic() {
-    turret.updateTelemetry();
-    Logger.recordOutput("Turret/AngleDegrees", turret.getAngle().in(Degrees));
-    Logger.recordOutput("ASCalibration/FinalComponentPoses", new Pose3d[] {
-        new Pose3d(turretTranslation, new Rotation3d(0, 0, turret.getAngle().in(Radians)))
-    });
-  }
+    public void periodic() {
+      turret.updateTelemetry();
+      Logger.recordOutput("Turret/AngleDegrees", turret.getAngle().in(Degrees));
+      Logger.recordOutput("ASCalibration/FinalComponentPoses", new Pose3d[] {
+          new Pose3d(turretTranslation, new Rotation3d(0, 0, turret.getAngle().in(Radians)))});
+          Logger.recordOutput("Turret/RawEncoderRotations", spark.getEncoder().getPosition());
+          Logger.recordOutput("Turret/YAMSAngleDegrees", turret.getAngle().in(Degrees));
+      }
 
-  @Override
-  public void simulationPeriodic() {
-    turret.simIterate();
+    @Override
+    public void simulationPeriodic() {
+      turret.simIterate();
+    }
   }
-}

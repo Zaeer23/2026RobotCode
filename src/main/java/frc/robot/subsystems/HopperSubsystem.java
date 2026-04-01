@@ -35,7 +35,7 @@ public class HopperSubsystem extends SubsystemBase {
       .withGearing(new MechanismGearing(GearBox.fromReductionStages(4))) 
       .withMotorInverted(false)
       .withIdleMode(MotorMode.COAST)
-      .withStatorCurrentLimit(Amps.of(35));
+      .withStatorCurrentLimit(Amps.of(40));
 
   
   private final SmartMotorController smc = new SparkWrapper(hopperSparkMax, DCMotor.getNEO(1), smcConfig);
@@ -43,8 +43,8 @@ public class HopperSubsystem extends SubsystemBase {
   private final FlyWheelConfig hopperConfig = new FlyWheelConfig(smc)
       .withDiameter(Inches.of(4))
       .withMass(Pounds.of(0.5))
-      .withUpperSoftLimit(RPM.of(3000))
-      .withLowerSoftLimit(RPM.of(-3000))
+      .withUpperSoftLimit(RPM.of(1500))
+      .withLowerSoftLimit(RPM.of(-1500))
       .withTelemetry("Hopper", TelemetryVerbosity.HIGH);
 
   private final FlyWheel hopper = new FlyWheel(hopperConfig);

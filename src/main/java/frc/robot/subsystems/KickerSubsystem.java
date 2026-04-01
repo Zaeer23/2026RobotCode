@@ -35,7 +35,7 @@ public class KickerSubsystem extends SubsystemBase {
       .withGearing(new MechanismGearing(GearBox.fromReductionStages(4))) // 4:1 gear reduction
       .withMotorInverted(true)
       .withIdleMode(MotorMode.BRAKE)
-      .withStatorCurrentLimit(Amps.of(20));
+      .withStatorCurrentLimit(Amps.of(30));
 
   private SmartMotorController smc = new SparkWrapper(kickerSparkMax, DCMotor.getNEO(1), smcConfig);
 

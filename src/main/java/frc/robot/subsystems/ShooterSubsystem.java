@@ -7,6 +7,7 @@ import org.littletonrobotics.junction.Logger;
 import com.revrobotics.spark.SparkLowLevel.MotorType;
 import com.revrobotics.spark.SparkMax;
 
+import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.Pair;
 import edu.wpi.first.math.controller.SimpleMotorFeedforward;
 import edu.wpi.first.math.system.plant.DCMotor;
@@ -36,8 +37,14 @@ import yams.motorcontrollers.SmartMotorControllerConfig.ControlMode;
 import yams.motorcontrollers.SmartMotorControllerConfig.MotorMode;
 import yams.motorcontrollers.SmartMotorControllerConfig.TelemetryVerbosity;
 import yams.motorcontrollers.local.SparkWrapper;
+import frc.robot.subsystems.LimeLight;
+import static edu.wpi.first.units.Units.RPM;
 
 public class ShooterSubsystem extends SubsystemBase {
+  private static final double SHOOTER_MAX_RPM = 5600.0;
+  private static final double LIMELIGHT_SHOT_MIN_RPM = 3200.0;
+  private static final double[] LIMELIGHT_DISTANCE_METERS = {1.0, 1.5, 2.0, 2.5, 3.0, 3.5};
+  private static final double[] LIMELIGHT_DISTANCE_RPM = {3200.0, 3500.0, 3900.0, 4400.0, 5000.0, 5600.0};
 
   private final SparkMax leaderSpark = new SparkMax(Constants.ShooterConstants.kLeaderMotorId,
       MotorType.kBrushless);
@@ -61,7 +68,7 @@ public class ShooterSubsystem extends SubsystemBase {
   private final FlyWheelConfig shooterConfig = new FlyWheelConfig(smc)
       .withDiameter(Inches.of(4))
       .withMass(Pounds.of(1))
-      .withUpperSoftLimit(RPM.of(5600))
+      .withUpperSoftLimit(RPM.of(5400))
       .withLowerSoftLimit(RPM.of(0))
       .withTelemetry("Shooter", TelemetryVerbosity.HIGH);
 
@@ -84,13 +91,12 @@ public class ShooterSubsystem extends SubsystemBase {
 }
 
 public Command setPercentAsRPM(Supplier<Double> percentSupplier) {
-    double maxRPM = 5600;
     return shooter.setSpeed(
-        () -> RPM.of(percentSupplier.get() * maxRPM)
+        () -> RPM.of(percentSupplier.get() * SHOOTER_MAX_RPM)
     ).finallyDo(() -> leaderSpark.set(0));
 }
   public Command spinUp() {
-    return setSpeed(RPM.of(5600));
+    return setSpeed(RPM.of(SHOOTER_MAX_RPM));
   }
 
   public Command stop() {
@@ -104,6 +110,67 @@ public Command setPercentAsRPM(Supplier<Double> percentSupplier) {
 
   public Command sysId() {
     return shooter.sysId(Volts.of(12), Volts.of(3).per(Second), Seconds.of(7));
+  }
+  
+  public Command setSpeedFromLimelight(LimeLight limelight, double fixedLaunchAngleDegrees) {
+    return shooter.setSpeed(() -> {
+        if (!limelight.hasTarget()) {
+            Logger.recordOutput("Shooter/LimelightShotValid", false);
+            Logger.recordOutput("Shooter/LimelightShotMessage", "No Limelight target");
+            Logger.recordOutput("Shooter/LimelightDistanceMeters", 0.0);
+            Logger.recordOutput("Shooter/LimelightCommandedRPM", 0.0);
+            return RPM.of(0);
+        }
+
+        double distanceMeters = estimateTargetDistanceMeters(limelight);
+        double commandedRPM = MathUtil.clamp(
+            rpmForDistanceMeters(distanceMeters), LIMELIGHT_SHOT_MIN_RPM, SHOOTER_MAX_RPM);
+
+        Logger.recordOutput("Shooter/LimelightShotValid", true);
+        Logger.recordOutput("Shooter/LimelightShotMessage", "Distance curve");
+        Logger.recordOutput("Shooter/LimelightEstimatedRPM", commandedRPM);
+        Logger.recordOutput("Shooter/LimelightCommandedRPM", commandedRPM);
+        Logger.recordOutput("Shooter/LimelightDistanceMeters", distanceMeters);
+
+        return RPM.of(commandedRPM);
+    }).finallyDo(() -> leaderSpark.set(0));
+}
+
+  private double estimateTargetDistanceMeters(LimeLight limelight) {
+    double ty = limelight.getTY();
+    double totalAngleRad = Math.toRadians(ProjectileMotion.LIMELIGHT_MOUNT_ANGLE_DEGREES + ty);
+    if (Math.abs(totalAngleRad) < 1e-6) {
+      return 0.0;
+    }
+
+    double distanceMeters =
+        (ProjectileMotion.HUB_APRILTAG_HEIGHT_METERS - ProjectileMotion.LIMELIGHT_MOUNT_HEIGHT_METERS)
+            / Math.tan(totalAngleRad);
+    return Math.max(0.0, distanceMeters);
+  }
+
+  private double rpmForDistanceMeters(double distanceMeters) {
+    if (distanceMeters <= LIMELIGHT_DISTANCE_METERS[0]) {
+      return LIMELIGHT_DISTANCE_RPM[0];
+    }
+
+    int lastIndex = LIMELIGHT_DISTANCE_METERS.length - 1;
+    if (distanceMeters >= LIMELIGHT_DISTANCE_METERS[lastIndex]) {
+      return LIMELIGHT_DISTANCE_RPM[lastIndex];
+    }
+
+    for (int i = 1; i < LIMELIGHT_DISTANCE_METERS.length; i++) {
+      double upperDistance = LIMELIGHT_DISTANCE_METERS[i];
+      if (distanceMeters <= upperDistance) {
+        double lowerDistance = LIMELIGHT_DISTANCE_METERS[i - 1];
+        double lowerRpm = LIMELIGHT_DISTANCE_RPM[i - 1];
+        double upperRpm = LIMELIGHT_DISTANCE_RPM[i];
+        double t = (distanceMeters - lowerDistance) / (upperDistance - lowerDistance);
+        return lowerRpm + t * (upperRpm - lowerRpm);
+      }
+    }
+
+    return LIMELIGHT_DISTANCE_RPM[lastIndex];
   }
 
   @Override
