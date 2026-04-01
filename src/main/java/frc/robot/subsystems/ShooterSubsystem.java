@@ -26,6 +26,7 @@ import edu.wpi.first.units.measure.Distance;
 import edu.wpi.first.units.measure.LinearVelocity;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
+import edu.wpi.first.wpilibj2.command.WaitCommand;
 import frc.robot.Constants;
 import yams.gearing.GearBox;
 import yams.gearing.MechanismGearing;
@@ -89,6 +90,10 @@ public class ShooterSubsystem extends SubsystemBase {
     return run(() -> leaderSpark.set(percentSupplier.get()))
         .finallyDo(() -> leaderSpark.set(0)); // stops motor on release
 }
+public Command waitCommand() {
+    return new WaitCommand(2.0);
+}
+
 
 public Command setPercentAsRPM(Supplier<Double> percentSupplier) {
     return shooter.setSpeed(

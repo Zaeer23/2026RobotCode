@@ -190,7 +190,7 @@ public class TurretSubsystem extends SubsystemBase {
         lastRawTrackingTxDegrees = rawTxDegrees;
         hasTrackingSample = true;
       }
-
+        
       // Freeze briefly on unrealistic one-frame jumps instead of commanding a violent reversal.
       double txDeltaDegrees = rawTxDegrees - lastRawTrackingTxDegrees;
       if (Math.abs(txDeltaDegrees) > TRACK_MAX_TX_JUMP_DEGREES) {

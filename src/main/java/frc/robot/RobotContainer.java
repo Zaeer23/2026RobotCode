@@ -159,11 +159,33 @@ private final Superstructure m_superstructure = new Superstructure(
 );
 NamedCommands.registerCommand("DeployIntake",
     Commands.parallel(
-        m_superstructure.setIntakePivotAngle(Degrees.of(115)),
-        m_superstructure.backFeedAllCommand()
+        m_superstructure.setIntakePivotAngle(Degrees.of(115))
     )
 );
+NamedCommands.registerCommand("shoot",
+Commands.parallel(
+  
+m_shooter.spinUp()
+    ) 
+);
+NamedCommands.registerCommand("feed",
+Commands.parallel(
+  m_kicker.feedCommand(),
+m_hopper.feedCommand()
+));
 
+NamedCommands.registerCommand("STOP",
+Commands.parallel(
+      m_shooter.stop(),
+      m_kicker.stopCommand(),
+      m_hopper.stopCommand()
+    )
+);
+NamedCommands.registerCommand("LimelightTurret", 
+Commands.parallel(
+      m_turret.trackTarget(m_limelight)
+    ) 
+);  
 
 // ------------------ END OF AUTONOMOUS COMMANDS --------------------
 
@@ -177,6 +199,7 @@ m_intake.setDefaultCommand(
     m_shooter.setSpeedFromLimelight(m_limelight, 45.0)
 );
     shooterXbox.leftBumper().whileTrue(m_climber.climbDownCommand());
+    shooterXbox.leftTrigger().whileTrue(m_climber.climbUpCommand());
 
 //got rid of pov buttons because they like to break too often, might fix later for more precise aiming if we dont get limelight in time.
        
