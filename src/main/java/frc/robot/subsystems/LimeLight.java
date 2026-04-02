@@ -1,5 +1,8 @@
 package frc.robot.subsystems;
 
+import java.util.Set;
+
+import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.math.geometry.Rotation3d;
 import edu.wpi.first.math.geometry.Translation2d;
@@ -24,6 +27,19 @@ public class LimeLight {
   public static double ALIGN_KP = 0.06;
   public static double ALIGN_MAX_OMEGA_RAD_S = 1.5;
   public static double ALIGN_TOLERANCE_DEGREES = 1.0;
+  public static double CLIMB_ALIGN_FORWARD_KP = 0.35;
+  public static double CLIMB_ALIGN_MAX_FORWARD = 0.45;
+  public static double CLIMB_ALIGN_CLOSE_MAX_FORWARD = 0.18;
+  public static double CLIMB_ALIGN_DESIRED_AREA = 2.0;
+  public static double CLIMB_ALIGN_AREA_TOLERANCE = 0.20;
+  public static double CLIMB_ALIGN_SLOW_AREA_ERROR = 0.60;
+  public static double CLIMB_ALIGN_TURN_ONLY_ERROR_DEGREES = 6.0;
+  public static double CLIMB_ALIGN_TX_FILTER_ALPHA = 0.35;
+  public static double CLIMB_ALIGN_AREA_FILTER_ALPHA = 0.25;
+  public static double CLIMB_ALIGN_MAX_TX_JUMP_DEGREES = 18.0;
+  public static double CLIMB_ALIGN_MAX_FORWARD_STEP = 0.08;
+  public static double CLIMB_ALIGN_LATENCY_FUDGE_MS = 20.0;
+  public static int CLIMB_ALIGN_JUMP_HOLD_CYCLES = 3;
 
   // Physical offset of the limelight lens from the robot's true center (inches).
   // Positive = limelight is to the RIGHT of center when viewed from above.
@@ -41,6 +57,12 @@ public class LimeLight {
     private final NetworkTableEntry tlEntry;
     private final NetworkTableEntry clEntry;
     private final NetworkTableEntry ledModeEntry;
+    private double filteredClimbTxDegrees = 0.0;
+    private double filteredClimbArea = 0.0;
+    private double lastRawClimbTxDegrees = 0.0;
+    private double lastClimbForward = 0.0;
+    private boolean hasClimbAlignSample = false;
+    private int climbJumpHoldCyclesRemaining = 0;
 
     public LimeLight(String name) {
         table = NetworkTableInstance.getDefault().getTable(name);
@@ -93,11 +115,6 @@ public class LimeLight {
     }
     // this is just optional helpers
 
-    // Positive tx means target is to the right
-    public double getTurnCorrection(double kP) {
-        return -getTX() * kP;
-    }
-
     // Example forward correction using area
     public double getForwardCorrection(double desiredArea, double kP) {
         return (desiredArea - getTA()) * kP;
@@ -130,12 +147,6 @@ public class LimeLight {
     return APRILTAG_DISTANCE_SCALE / area;
   }
 
-  // this is locally to what the camera is seeing
-  public Pose3d getLimelightPose3d()
-  {
-    return calculatePoseFromAngles(getTX(), getTY(), getLimelightAprilDistance_BasedScales());
-  }
-
   private Pose3d calculatePoseFromAngles(double txDegrees, double tyDegrees, double distance) {
     double tx = Math.toRadians(txDegrees);
     double ty = Math.toRadians(tyDegrees);
@@ -146,29 +157,6 @@ public class LimeLight {
 
     return new Pose3d(new Translation3d(x, y, z), new Rotation3d());
   }
-
-
-  // Deprecated until we can get the limelight position, but this is the more accurate way to do it, just need to make it flexible for different heights and angles
-  public double getLimelightAprilDistance_BasedHeights() 
-  {
-    double targetOffsetAngle_Vertical = getTX();
-
-    // how many degrees back is your limelight rotated from perfectly vertical?
-    double limelightMountAngleDegrees = 0.0; 
-
-    // distance from the center of the Limelight lens to the floor
-    double limelightLensHeightInches = 20.0; 
-
-    // distance from the target to the floor
-    double goalHeightInches = 60.0; 
-
-    double angleToGoalDegrees = limelightMountAngleDegrees + targetOffsetAngle_Vertical;
-    double angleToGoalRadians = angleToGoalDegrees * (3.14159 / 180.0);
-
-    double distance = (goalHeightInches - limelightLensHeightInches) / Math.tan(angleToGoalRadians);
-    return distance;
-  }
-
   public boolean isCentered() {
         return hasTarget() && Math.abs(getCorrectedTX()) < ALIGN_TOLERANCE_DEGREES;
   }
@@ -189,6 +177,17 @@ public class LimeLight {
     double parallax = Math.toDegrees(
         Math.atan2(LIMELIGHT_LATERAL_OFFSET_INCHES, distanceInches));
     return getTX() - parallax;
+  }
+
+  public double getCorrectedTX(AprilTagScan scan) {
+    if (!scan.isValid()) {
+      return 0.0;
+    }
+
+    double distanceInches = Math.max(scan.distance * 39.37, 1.0);
+    double parallax = Math.toDegrees(
+        Math.atan2(LIMELIGHT_LATERAL_OFFSET_INCHES, distanceInches));
+    return scan.tx - parallax;
   }
 
   public double getAlignOmega() {
@@ -242,6 +241,118 @@ public class LimeLight {
         //this should work now :)
   }
 
+  public Command alignToTagsCommand(SwerveSubsystem drivebase, Set<Integer> allowedTagIds) {
+    return Commands.runEnd(
+            () -> {
+              AprilTagScan scan = scan(allowedTagIds);
+              if (!scan.isValid()) {
+                filteredClimbTxDegrees = 0.0;
+                filteredClimbArea = 0.0;
+                lastRawClimbTxDegrees = 0.0;
+                lastClimbForward = 0.0;
+                hasClimbAlignSample = false;
+                climbJumpHoldCyclesRemaining = 0;
+                drivebase.drive(Translation2d.kZero, 0.0, false);
+                return;
+              }
+
+              double robotOmegaDegPerSecond = Math.toDegrees(drivebase.getRobotVelocity().omegaRadiansPerSecond);
+              double visionLatencySeconds = (scan.latencyMs + CLIMB_ALIGN_LATENCY_FUDGE_MS) / 1000.0;
+              double latencyCompensationDegrees = robotOmegaDegPerSecond * visionLatencySeconds;
+              double rawTxDegrees = scan.tx + latencyCompensationDegrees;
+              double rawArea = getTA();
+
+              if (!hasClimbAlignSample) {
+                filteredClimbTxDegrees = rawTxDegrees;
+                filteredClimbArea = rawArea;
+                lastRawClimbTxDegrees = rawTxDegrees;
+                hasClimbAlignSample = true;
+              }
+
+              double txDeltaDegrees = rawTxDegrees - lastRawClimbTxDegrees;
+              if (Math.abs(txDeltaDegrees) > CLIMB_ALIGN_MAX_TX_JUMP_DEGREES) {
+                climbJumpHoldCyclesRemaining = CLIMB_ALIGN_JUMP_HOLD_CYCLES;
+              } else if (climbJumpHoldCyclesRemaining > 0) {
+                climbJumpHoldCyclesRemaining--;
+              }
+              lastRawClimbTxDegrees = rawTxDegrees;
+
+              if (climbJumpHoldCyclesRemaining == 0) {
+                filteredClimbTxDegrees +=
+                    (rawTxDegrees - filteredClimbTxDegrees) * CLIMB_ALIGN_TX_FILTER_ALPHA;
+                filteredClimbArea +=
+                    (rawArea - filteredClimbArea) * CLIMB_ALIGN_AREA_FILTER_ALPHA;
+              }
+
+              double filteredDistanceMeters =
+                  Math.max(calculateDistanceFromArea(Math.max(filteredClimbArea, 1e-6)), 0.0);
+              AprilTagScan filteredScan = new AprilTagScan(
+                  true,
+                  scan.tagID,
+                  filteredClimbTxDegrees,
+                  scan.ty,
+                  filteredDistanceMeters,
+                  scan.latencyMs,
+                  scan.pose);
+              double correctedTx = getCorrectedTX(filteredScan);
+              double omega = MathUtil.clamp(
+                  -correctedTx * ALIGN_KP,
+                  -ALIGN_MAX_OMEGA_RAD_S,
+                  ALIGN_MAX_OMEGA_RAD_S);
+              double areaError = CLIMB_ALIGN_DESIRED_AREA - filteredClimbArea;
+              double requestedForward = MathUtil.clamp(
+                  areaError * CLIMB_ALIGN_FORWARD_KP,
+                  -CLIMB_ALIGN_MAX_FORWARD,
+                  CLIMB_ALIGN_MAX_FORWARD);
+              double forwardMagnitudeCap =
+                  Math.abs(areaError) < CLIMB_ALIGN_SLOW_AREA_ERROR
+                      ? CLIMB_ALIGN_CLOSE_MAX_FORWARD
+                      : CLIMB_ALIGN_MAX_FORWARD;
+              if (Math.abs(correctedTx) > CLIMB_ALIGN_TURN_ONLY_ERROR_DEGREES) {
+                forwardMagnitudeCap = 0.0;
+              }
+              requestedForward = MathUtil.clamp(
+                  requestedForward,
+                  -forwardMagnitudeCap,
+                  forwardMagnitudeCap);
+              double forward = MathUtil.clamp(
+                  requestedForward,
+                  lastClimbForward - CLIMB_ALIGN_MAX_FORWARD_STEP,
+                  lastClimbForward + CLIMB_ALIGN_MAX_FORWARD_STEP);
+              lastClimbForward = forward;
+
+              drivebase.drive(
+                  new Translation2d(forward, 0.0),
+                  omega,
+                  false);
+            },
+            () -> {
+              filteredClimbTxDegrees = 0.0;
+              filteredClimbArea = 0.0;
+              lastRawClimbTxDegrees = 0.0;
+              lastClimbForward = 0.0;
+              hasClimbAlignSample = false;
+              climbJumpHoldCyclesRemaining = 0;
+              drivebase.drive(Translation2d.kZero, 0.0, false);
+            },
+            drivebase)
+        .until(() -> {
+          AprilTagScan scan = scan(allowedTagIds);
+          return scan.isValid()
+              && hasClimbAlignSample
+              && Math.abs(getCorrectedTX(new AprilTagScan(
+                  true,
+                  scan.tagID,
+                  filteredClimbTxDegrees,
+                  scan.ty,
+                  Math.max(calculateDistanceFromArea(Math.max(filteredClimbArea, 1e-6)), 0.0),
+                  scan.latencyMs,
+                  scan.pose))) < ALIGN_TOLERANCE_DEGREES
+              && Math.abs(CLIMB_ALIGN_DESIRED_AREA - filteredClimbArea) < CLIMB_ALIGN_AREA_TOLERANCE;
+        })
+        .withName("LimeLight.alignToTags");
+  }
+
   public static class AprilTagScan {
     public final boolean hasTarget;
     public final int tagID;
@@ -287,6 +398,23 @@ public AprilTagScan scan() {
         pose
     );
     
+}
+
+public AprilTagScan scan(Set<Integer> allowedTagIds) {
+    AprilTagScan scan = scan();
+    if (!scan.isValid() || allowedTagIds.contains(scan.tagID)) {
+        return scan;
+    }
+
+    return new AprilTagScan(
+        false,
+        -1,
+        scan.tx,
+        scan.ty,
+        0.0,
+        scan.latencyMs,
+        new Pose3d()
+    );
 }
 
 }

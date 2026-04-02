@@ -3,15 +3,14 @@
 // the WPILib BSD license file in the root directory of this project.
 
 package frc.robot;
-import static edu.wpi.first.units.Units.RPM;
 import com.pathplanner.lib.auto.NamedCommands;
+import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.controller.ProfiledPIDController;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.trajectory.TrapezoidProfile.Constraints;
 import edu.wpi.first.math.util.Units;
-import edu.wpi.first.units.measure.Angle;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.Filesystem;
 import edu.wpi.first.wpilibj.RobotBase;
@@ -44,10 +43,12 @@ import static edu.wpi.first.units.Units.Degrees;
  */
 public class RobotContainer
 {
+  private static final double[] DRIVE_SPEED_PRESETS = {0.35, 0.65, 1.0};
 
   // Replace with CommandPS4Controller or CommandJoystick if needed
   final         CommandXboxController driverXbox = new CommandXboxController(0);
   final         CommandXboxController shooterXbox = new CommandXboxController(1);
+  private int currentDriveSpeedIndex = 1;
   // The robot's subsystems and commands are defined here...
   private final SwerveSubsystem       drivebase  = new SwerveSubsystem(new File(Filesystem.getDeployDirectory(),
                                                                                 "swerve/neo"));
@@ -62,13 +63,6 @@ public class RobotContainer
                                                             .deadband(OperatorConstants.DEADBAND)
                                                             .scaleTranslation(0.8)
                                                             .allianceRelativeControl(true);
-
-  /**
-   * Clone's the angular velocity input stream and converts it to a fieldRelative input stream.
-   */
-  SwerveInputStream driveDirectAngle = driveAngularVelocity.copy().withControllerHeadingAxis(driverXbox::getRightX,
-                                                                                             driverXbox::getRightY)
-                                                           .headingWhile(true);
 
   /**
    * Clone's the angular velocity input stream and converts it to a robotRelative input stream.
@@ -186,6 +180,15 @@ Commands.parallel(
       m_turret.trackTarget(m_limelight)
     ) 
 );  
+NamedCommands.registerCommand("ClimbBarAlign",
+    m_superstructure.climbBarAlignCommand(drivebase).withTimeout(2.5)
+);
+NamedCommands.registerCommand("ClimbBarAlignAndClimb",
+    Commands.sequence(
+        m_superstructure.climbBarAlignCommand(drivebase).withTimeout(2.5),
+        m_climber.climbUpCommand().withTimeout(2.5)
+    )
+);
 
 // ------------------ END OF AUTONOMOUS COMMANDS --------------------
 
@@ -226,9 +229,8 @@ shooterXbox.b().whileTrue(m_intake.intakeCommand());
    */
   private void configureBindings()
   {
-    Command driveFieldOrientedAnglularVelocity = drivebase.driveFieldOriented(driveAngularVelocity);
     Command driveRobotRelativeAngularVelocity = Commands.run(
-        () -> drivebase.drive(driveRobotOriented.get()),
+        () -> drivebase.drive(getScaledRobotRelativeDrive()),
         drivebase);
     Command driveFieldOrientedDirectAngleKeyboard      = drivebase.driveFieldOriented(driveDirectAngleKeyboard);
     if (RobotBase.isSimulation())
@@ -269,7 +271,7 @@ shooterXbox.b().whileTrue(m_intake.intakeCommand());
     }
     if (DriverStation.isTest())
     {
-      drivebase.setDefaultCommand(driveFieldOrientedAnglularVelocity); // Overrides drive command above!
+      drivebase.setDefaultCommand(driveRobotRelativeAngularVelocity); // Keep driver controls robot-relative in test too.
 
       driverXbox.x().whileTrue(Commands.runOnce(drivebase::lock, drivebase).repeatedly());
       driverXbox.y().whileTrue(drivebase.driveToDistanceCommand(1.0, 0.2));
@@ -280,9 +282,10 @@ shooterXbox.b().whileTrue(m_intake.intakeCommand());
     } else
     {
       driverXbox.a().onTrue((Commands.runOnce(drivebase::zeroGyroWithAlliance)));
-      driverXbox.rightStick().whileTrue(driveFieldOrientedAnglularVelocity);
+      driverXbox.rightStick().whileTrue(driveRobotRelativeAngularVelocity);
+      driverXbox.povUp().onTrue(Commands.runOnce(this::increaseDriveSpeedPreset));
+      driverXbox.povDown().onTrue(Commands.runOnce(this::decreaseDriveSpeedPreset));
       driverXbox.x().onTrue(Commands.runOnce(drivebase::addFakeVisionReading));
-      driverXbox.start().whileTrue(Commands.none());
       driverXbox.back().whileTrue(Commands.none());
       driverXbox.leftBumper().whileTrue(Commands.runOnce(drivebase::lock, drivebase).repeatedly());
       
@@ -297,6 +300,9 @@ shooterXbox.b().whileTrue(m_intake.intakeCommand());
   {
     driverXbox.rightBumper().whileTrue(
       m_superstructure.limelightAlignCommand(drivebase)
+    );
+    driverXbox.start().whileTrue(
+      m_superstructure.climbBarAlignCommand(drivebase)
     );
   }
 
@@ -314,5 +320,25 @@ shooterXbox.b().whileTrue(m_intake.intakeCommand());
   public void setMotorBrake(boolean brake)
   {
     drivebase.setMotorBrake(brake);
+  }
+
+  private ChassisSpeeds getScaledRobotRelativeDrive()
+  {
+    ChassisSpeeds requestedSpeeds = driveRobotOriented.get();
+    double driveScale = DRIVE_SPEED_PRESETS[currentDriveSpeedIndex];
+    return new ChassisSpeeds(
+        requestedSpeeds.vxMetersPerSecond * driveScale,
+        requestedSpeeds.vyMetersPerSecond * driveScale,
+        requestedSpeeds.omegaRadiansPerSecond * driveScale);
+  }
+
+  private void increaseDriveSpeedPreset()
+  {
+    currentDriveSpeedIndex = Math.min(currentDriveSpeedIndex + 1, DRIVE_SPEED_PRESETS.length - 1);
+  }
+
+  private void decreaseDriveSpeedPreset()
+  {
+    currentDriveSpeedIndex = Math.max(currentDriveSpeedIndex - 1, 0);
   }
 }

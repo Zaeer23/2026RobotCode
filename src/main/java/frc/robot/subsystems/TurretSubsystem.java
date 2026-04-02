@@ -1,5 +1,6 @@
 package frc.robot.subsystems;
 
+import java.util.Set;
 import java.util.function.Supplier;
 
 import org.littletonrobotics.junction.Logger;
@@ -41,6 +42,9 @@ import yams.motorcontrollers.local.SparkWrapper;
 
 public class TurretSubsystem extends SubsystemBase {
 
+  private static final Set<Integer> TRACKING_TAG_IDS =
+      Set.of(9, 10, 11, 2, 4, 3, 8, 5, 19, 20, 18, 27, 26, 25, 21, 24);
+
   private final double MAX_ONE_DIR_FOV = 90;
   public final Translation3d turretTranslation = new Translation3d(-0.205, 0.0, 0.375);
 
@@ -73,17 +77,12 @@ public class TurretSubsystem extends SubsystemBase {
 
   // Limelight physical offset from turret pivot center
   private static final double LIMELIGHT_HORIZONTAL_OFFSET_INCHES = 9.0;  // tune between 8-10
-  private static final double LIMELIGHT_FORWARD_OFFSET_INCHES = 2.5;     // fairly close to flush
 
   // Slow zone: ramp down output near soft limits
   private static final double SLOW_ZONE_DEGREES = 20.0;
   
   // Tracking constants — tune kP if still oscillating/sluggish
   private static final double TRACK_DEADBAND_DEGREES = 0.25;
-  private static final double TRACK_KP = 0.004;
-  private static final double TRACK_MAX_OUTPUT = 0.18;
-  private static final double TRACK_MIN_OUTPUT = 0.035;
-  private static final double TRACK_DAMPING_DEGREES = 12.0;
   private static final double TRACK_TX_FILTER_ALPHA = 0.35;
   private static final double TRACK_DISTANCE_FILTER_ALPHA = 0.20;
   private static final double TRACK_MAX_TARGET_STEP_DEGREES = 4.0;
@@ -161,7 +160,7 @@ public class TurretSubsystem extends SubsystemBase {
 
   public Command trackTarget(LimeLight limelight, SwerveSubsystem drivebase) {
     return turret.setAngle(() -> {
-      LimeLight.AprilTagScan scan = limelight.scan();
+      LimeLight.AprilTagScan scan = limelight.scan(TRACKING_TAG_IDS);
       double currentAngleDegrees = turret.getAngle().in(Degrees);
 
       if (!scan.isValid()) {
@@ -171,6 +170,7 @@ public class TurretSubsystem extends SubsystemBase {
         hasTrackingSample = false;
         trackingJumpHoldCyclesRemaining = 0;
         Logger.recordOutput("Turret/TrackingState", "NO_TARGET");
+        Logger.recordOutput("Turret/TrackingTagID", -1);
         Logger.recordOutput("Turret/FilteredTX", filteredTrackingTxDegrees);
         Logger.recordOutput("Turret/TrackingTargetAngleDegrees", currentAngleDegrees);
         return turret.getAngle();
@@ -237,6 +237,7 @@ public class TurretSubsystem extends SubsystemBase {
       Logger.recordOutput("Turret/FilteredDistanceInches", filteredTrackingDistanceInches);
       Logger.recordOutput("Turret/ParallaxDegrees",   parallaxDegrees);
       Logger.recordOutput("Turret/JumpHoldCycles", trackingJumpHoldCyclesRemaining);
+      Logger.recordOutput("Turret/TrackingTagID", scan.tagID);
       Logger.recordOutput("Turret/TargetDistanceM", scan.distance);
       Logger.recordOutput("Turret/TrackingTargetAngleDegrees", clampedTargetAngleDegrees);
       Logger.recordOutput("Turret/TrackingState", "TRACKING");

@@ -1,8 +1,7 @@
 package frc.robot.subsystems;
 
+import java.util.Set;
 import java.util.function.Supplier;
-
-import javax.sound.sampled.LineEvent;
 
 import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.math.geometry.Rotation3d;
@@ -25,6 +24,8 @@ import frc.robot.subsystems.swervedrive.SwerveSubsystem;
  * for unified control during shooting operations.
  */
 public class Superstructure extends SubsystemBase {
+
+  private static final Set<Integer> CLIMB_BAR_TAG_IDS = Set.of(15, 16, 31, 32);
 
   public final ShooterSubsystem shooter;
   public final TurretSubsystem turret;
@@ -250,6 +251,12 @@ public Command manualTurretControl(Supplier<Double> speedSupplier) {
   public Command limelightAlignCommand(SwerveSubsystem drivebase) {
     return limelight.alignCommand(drivebase).withName("Superstructure.limelightAlign");
   }
+
+  public Command climbBarAlignCommand(SwerveSubsystem drivebase) {
+    return limelight.alignToTagsCommand(drivebase, CLIMB_BAR_TAG_IDS)
+        .withName("Superstructure.climbBarAlign");
+  }
+
 public Command trackTargetCommand(LimeLight limelight) {
     return turret.trackTarget(limelight).withName("Superstructure.trackTarget");
 }
