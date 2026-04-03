@@ -73,7 +73,7 @@ public class IntakeSubsystem extends SubsystemBase {
       .withMotorInverted(false)
       .withIdleMode(MotorMode.COAST)
       .withSoftLimit(Degrees.of(0), Degrees.of(150))
-      .withStatorCurrentLimit(Amps.of(30))
+      .withStatorCurrentLimit(Amps.of(40))
       .withClosedLoopRampRate(Seconds.of(0.1))
       .withOpenLoopRampRate(Seconds.of(0.1));
 

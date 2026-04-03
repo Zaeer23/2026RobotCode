@@ -189,6 +189,14 @@ NamedCommands.registerCommand("ClimbBarAlignAndClimb",
         m_climber.climbUpCommand().withTimeout(2.5)
     )
 );
+NamedCommands.registerCommand("ClimbDown",
+ Commands.sequence(
+  m_climber.climbDownCommand()
+ ));
+ NamedCommands.registerCommand("ClimbUp",
+ Commands.sequence(
+  m_climber.climbUpCommand()
+ ));
 
 // ------------------ END OF AUTONOMOUS COMMANDS --------------------
 
@@ -201,11 +209,10 @@ m_intake.setDefaultCommand(
     shooterXbox.rightBumper().whileTrue(
     m_shooter.setSpeedFromLimelight(m_limelight, 45.0)
 );
-    shooterXbox.leftBumper().whileTrue(m_climber.climbDownCommand());
-    shooterXbox.leftTrigger().whileTrue(m_climber.climbUpCommand());
+    //shooterXbox.leftBumper().whileTrue(m_climber.climbDownCommand());
+    //shooterXbox.leftTrigger(0.1).whileTrue(m_climber.climbUpCommand());
 
-//got rid of pov buttons because they like to break too often, might fix later for more precise aiming if we dont get limelight in time.
-       
+//got rid of pov buttons because they like to break too often, might fix later for more precise aiming if we dont get limelight in ti
     new Trigger(() -> shooterXbox.getRightTriggerAxis() > 0.10)
     .whileTrue(m_shooter.setPercentAsRPM(
         () -> shooterXbox.getRightTriggerAxis()

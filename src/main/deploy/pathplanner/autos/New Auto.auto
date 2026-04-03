@@ -95,19 +95,13 @@
               {
                 "type": "wait",
                 "data": {
-                  "waitTime": 3.0
+                  "waitTime": 5.0
                 }
               },
               {
                 "type": "named",
                 "data": {
                   "name": "STOP"
-                }
-              },
-              {
-                "type": "named",
-                "data": {
-                  "name": "ClimbBarAlignAndClimb"
                 }
               }
             ]

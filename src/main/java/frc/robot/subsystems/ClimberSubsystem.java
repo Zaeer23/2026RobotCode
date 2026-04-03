@@ -18,6 +18,9 @@ public class ClimberSubsystem extends SubsystemBase {
     public ClimberSubsystem() {
         SparkMaxConfig config = new SparkMaxConfig();
         config.idleMode(IdleMode.kBrake); // Brake when idle — won't slip on bar
+        climberSparkMax.configure(config,
+        com.revrobotics.spark.SparkBase.ResetMode.kResetSafeParameters,
+        com.revrobotics.spark.SparkBase.PersistMode.kPersistParameters);
         
     }
 
