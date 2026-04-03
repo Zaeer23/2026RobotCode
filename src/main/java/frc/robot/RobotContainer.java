@@ -189,14 +189,11 @@ NamedCommands.registerCommand("ClimbBarAlignAndClimb",
         m_climber.climbUpCommand().withTimeout(2.5)
     )
 );
-NamedCommands.registerCommand("ClimbDown",
- Commands.sequence(
-  m_climber.climbDownCommand()
- ));
- NamedCommands.registerCommand("ClimbUp",
- Commands.sequence(
-  m_climber.climbUpCommand()
- ));
+NamedCommands.registerCommand("backfeed",
+Commands.parallel(
+  m_hopper.backFeedCommand()
+));
+
 
 // ------------------ END OF AUTONOMOUS COMMANDS --------------------
 
