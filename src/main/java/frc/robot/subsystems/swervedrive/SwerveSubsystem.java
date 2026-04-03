@@ -55,6 +55,7 @@ import swervelib.telemetry.SwerveDriveTelemetry.TelemetryVerbosity;
 
 public class SwerveSubsystem extends SubsystemBase
 {
+  private boolean autoBuilderConfigured = false;
   
   /**
    * Swerve drive object.
@@ -108,7 +109,6 @@ public class SwerveSubsystem extends SubsystemBase
       // Stop the odometry thread if we are using vision that way we can synchronize updates better.
       swerveDrive.stopOdometryThread();
     }
-    setupPathPlanner();
     RobotModeTriggers.autonomous().onTrue(Commands.runOnce(this::zeroGyroWithAlliance));
   }
 
@@ -211,16 +211,26 @@ public class SwerveSubsystem extends SubsystemBase
           this
           // Reference to this subsystem to set requirements
                            );
+      autoBuilderConfigured = true;
 
     } catch (Exception e)
     {
-      // Handle exception as needed
-      e.printStackTrace();
+      autoBuilderConfigured = false;
+      DriverStation.reportError("PathPlanner AutoBuilder configuration failed: " + e.getMessage(), e.getStackTrace());
     }
 
     //Preload PathPlanner Path finding
     // IF USING CUSTOM PATHFINDER ADD BEFORE THIS LINE
-    PathfindingCommand.warmupCommand().schedule();
+    if (autoBuilderConfigured)
+    {
+      try
+      {
+        PathfindingCommand.warmupCommand().schedule();
+      } catch (Exception e)
+      {
+        DriverStation.reportError("PathPlanner warmup failed: " + e.getMessage(), e.getStackTrace());
+      }
+    }
   }
 
   /**
@@ -255,8 +265,21 @@ public class SwerveSubsystem extends SubsystemBase
    */
   public Command getAutonomousCommand(String pathName)
   {
-    // Create a path following command using AutoBuilder. This will also trigger event markers.
-    return new PathPlannerAuto(pathName);
+    if (!autoBuilderConfigured)
+    {
+      DriverStation.reportError("Autonomous unavailable because PathPlanner AutoBuilder is not configured.", false);
+      return Commands.none();
+    }
+
+    try
+    {
+      // Create a path following command using AutoBuilder. This will also trigger event markers.
+      return new PathPlannerAuto(pathName);
+    } catch (Exception e)
+    {
+      DriverStation.reportError("Failed to load autonomous '" + pathName + "': " + e.getMessage(), e.getStackTrace());
+      return Commands.none();
+    }
   }
 
   /**

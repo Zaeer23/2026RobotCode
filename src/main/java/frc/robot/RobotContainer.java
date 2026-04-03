@@ -3,7 +3,7 @@
 // the WPILib BSD license file in the root directory of this project.
 
 package frc.robot;
-import com.pathplanner.lib.auto.NamedCommands;
+import java.util.Set;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.controller.ProfiledPIDController;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -13,13 +13,13 @@ import edu.wpi.first.math.trajectory.TrapezoidProfile.Constraints;
 import edu.wpi.first.math.util.Units;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.Filesystem;
-import edu.wpi.first.wpilibj.RobotBase;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import edu.wpi.first.wpilibj2.command.button.Trigger;
 import frc.robot.Constants.OperatorConstants;
 import frc.robot.commands.LimeLightRunner;
+import frc.robot.commands.ShootingCommand;
 import frc.robot.subsystems.HopperSubsystem;
 import frc.robot.subsystems.IntakeSubsystem;
 import frc.robot.subsystems.LimeLight;
@@ -44,6 +44,7 @@ import static edu.wpi.first.units.Units.Degrees;
 public class RobotContainer
 {
   private static final double[] DRIVE_SPEED_PRESETS = {0.35, 0.65, 1.0};
+  private static final Set<Integer> HUB_TAG_IDS = Set.of(9, 10, 11, 18, 19, 20);
 
   // Replace with CommandPS4Controller or CommandJoystick if needed
   final         CommandXboxController driverXbox = new CommandXboxController(0);
@@ -57,8 +58,8 @@ public class RobotContainer
    * Converts driver input into a field-relative ChassisSpeeds that is controlled by angular velocity.
    */
   SwerveInputStream driveAngularVelocity = SwerveInputStream.of(drivebase.getSwerveDrive(),
-                                                                () -> driverXbox.getLeftY() * -1,
-                                                                () -> driverXbox.getLeftX() * -1)
+                                                                () -> (driverXbox.getLeftY() * -1),
+                                                                () -> (driverXbox.getLeftX() * -1))
                                                             .withControllerRotationAxis(driverXbox::getRightX)
                                                             .deadband(OperatorConstants.DEADBAND)
                                                             .scaleTranslation(0.8)
@@ -71,8 +72,8 @@ public class RobotContainer
                                                              .allianceRelativeControl(false);
 
   SwerveInputStream driveAngularVelocityKeyboard = SwerveInputStream.of(drivebase.getSwerveDrive(),
-                                                                        () -> -driverXbox.getLeftY(),
-                                                                        () -> -driverXbox.getLeftX())
+                                                                        () -> -(driverXbox.getLeftY()),
+                                                                        () -> -(driverXbox.getLeftX()))
                                                                     .withControllerRotationAxis(() -> driverXbox.getRawAxis(
                                                                         2))
                                                                     .deadband(OperatorConstants.DEADBAND)
@@ -124,7 +125,6 @@ private final Superstructure m_superstructure = new Superstructure(
     // Configure the trigger bindings
     configureBindings();
     DriverStation.silenceJoystickConnectionWarning(true);
-    NamedCommands.registerCommand("test", Commands.print("I EXIST"));
 
     configureSubSystemKeys();
     configureLimeLightKeys();
@@ -145,67 +145,13 @@ private final Superstructure m_superstructure = new Superstructure(
     })
 );
 
-//  -------------------- AUTONOMOUS COMMANDS --------------------
-   NamedCommands.registerCommand("HungryHungryIntake",
-    Commands.parallel(
-        m_superstructure.intakeCommand()
-    )
-);
-NamedCommands.registerCommand("DeployIntake",
-    Commands.parallel(
-        m_superstructure.setIntakePivotAngle(Degrees.of(115))
-    )
-);
-NamedCommands.registerCommand("shoot",
-Commands.parallel(
-  
-m_shooter.spinUp()
-    ) 
-);
-NamedCommands.registerCommand("feed",
-Commands.parallel(
-  m_kicker.feedCommand(),
-m_hopper.feedCommand()
-));
-
-NamedCommands.registerCommand("STOP",
-Commands.parallel(
-      m_shooter.stop(),
-      m_kicker.stopCommand(),
-      m_hopper.stopCommand()
-    )
-);
-NamedCommands.registerCommand("LimelightTurret", 
-Commands.parallel(
-      m_turret.trackTarget(m_limelight)
-    ) 
-);  
-NamedCommands.registerCommand("ClimbBarAlign",
-    m_superstructure.climbBarAlignCommand(drivebase).withTimeout(2.5)
-);
-NamedCommands.registerCommand("ClimbBarAlignAndClimb",
-    Commands.sequence(
-        m_superstructure.climbBarAlignCommand(drivebase).withTimeout(2.5),
-        m_climber.climbUpCommand().withTimeout(2.5)
-    )
-);
-NamedCommands.registerCommand("backfeed",
-Commands.parallel(
-  m_hopper.backFeedCommand()
-));
-
-
-// ------------------ END OF AUTONOMOUS COMMANDS --------------------
-
 m_intake.setDefaultCommand(
     m_intake.manualPivot(() -> 
-    shooterXbox.getLeftY())
+    -shooterXbox.getLeftY())
 );
     shooterXbox.x().whileTrue(m_hopper.backFeedCommand());
 
-    shooterXbox.rightBumper().whileTrue(
-    m_shooter.setSpeedFromLimelight(m_limelight, 45.0)
-);
+    shooterXbox.rightBumper().whileTrue(m_superstructure.limelightShootCommand(drivebase));
     //shooterXbox.leftBumper().whileTrue(m_climber.climbDownCommand());
     //shooterXbox.leftTrigger(0.1).whileTrue(m_climber.climbUpCommand());
 
@@ -236,15 +182,7 @@ shooterXbox.b().whileTrue(m_intake.intakeCommand());
     Command driveRobotRelativeAngularVelocity = Commands.run(
         () -> drivebase.drive(getScaledRobotRelativeDrive()),
         drivebase);
-    Command driveFieldOrientedDirectAngleKeyboard      = drivebase.driveFieldOriented(driveDirectAngleKeyboard);
-    if (RobotBase.isSimulation())
-    {
-      drivebase.setDefaultCommand(driveFieldOrientedDirectAngleKeyboard);
-    } else
-    {
-      // Without reliable absolute module references, robot-oriented driving is the safer default.
-      drivebase.setDefaultCommand(driveRobotRelativeAngularVelocity);
-    }
+    drivebase.setDefaultCommand(driveRobotRelativeAngularVelocity);
 
     if (Robot.isSimulation())
     {
@@ -285,7 +223,7 @@ shooterXbox.b().whileTrue(m_intake.intakeCommand());
       driverXbox.rightBumper().onTrue(Commands.none());
     } else
     {
-      driverXbox.a().onTrue((Commands.runOnce(drivebase::zeroGyroWithAlliance)));
+      driverXbox.a().onTrue((Commands.runOnce(drivebase::zeroGyro)));
       driverXbox.rightStick().whileTrue(driveRobotRelativeAngularVelocity);
       driverXbox.povUp().onTrue(Commands.runOnce(this::increaseDriveSpeedPreset));
       driverXbox.povDown().onTrue(Commands.runOnce(this::decreaseDriveSpeedPreset));
@@ -317,8 +255,7 @@ shooterXbox.b().whileTrue(m_intake.intakeCommand());
    */
   public Command getAutonomousCommand()
   {
-    // An example command will be run in autonomous
-    return drivebase.getAutonomousCommand("New Auto");
+    return new ShootingCommand(m_shooter, m_limelight, m_kicker, m_hopper, HUB_TAG_IDS);
   }
 
   public void setMotorBrake(boolean brake)
@@ -328,12 +265,18 @@ shooterXbox.b().whileTrue(m_intake.intakeCommand());
 
   private ChassisSpeeds getScaledRobotRelativeDrive()
   {
-    ChassisSpeeds requestedSpeeds = driveRobotOriented.get();
     double driveScale = DRIVE_SPEED_PRESETS[currentDriveSpeedIndex];
+    double maxLinearSpeed = drivebase.getSwerveDrive().getMaximumChassisVelocity();
+    double maxAngularSpeed = drivebase.getSwerveDrive().getMaximumChassisAngularVelocity();
+
+    double forward = -driverXbox.getLeftY() * driveScale * maxLinearSpeed;
+    double strafeLeft = -driverXbox.getLeftX() * driveScale * maxLinearSpeed;
+    double rotateCounterClockwise = -driverXbox.getRightX() * driveScale * maxAngularSpeed;
+
     return new ChassisSpeeds(
-        requestedSpeeds.vxMetersPerSecond * driveScale,
-        requestedSpeeds.vyMetersPerSecond * driveScale,
-        requestedSpeeds.omegaRadiansPerSecond * driveScale);
+        forward,
+        strafeLeft,
+        rotateCounterClockwise);
   }
 
   private void increaseDriveSpeedPreset()

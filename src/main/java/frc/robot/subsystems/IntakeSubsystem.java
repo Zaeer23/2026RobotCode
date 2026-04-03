@@ -50,7 +50,9 @@ public class IntakeSubsystem extends SubsystemBase {
       .withGearing(new MechanismGearing(GearBox.fromReductionStages(1))) 
       .withMotorInverted(false)
       .withIdleMode(MotorMode.COAST)
-      .withStatorCurrentLimit(Amps.of(40));
+      .withStatorCurrentLimit(Amps.of(40))
+      .withClosedLoopRampRate(Seconds.of(0.20))
+      .withOpenLoopRampRate(Seconds.of(0.20));
 
   // 2. Changed NovaWrapper to SparkWrapper and NeoVortex to NEO
   private final SmartMotorController smc = new SparkWrapper(rollerMotor, DCMotor.getNEO(1), smcConfig);
@@ -71,7 +73,7 @@ public class IntakeSubsystem extends SubsystemBase {
       .withTelemetry("IntakePivotMotor", TelemetryVerbosity.HIGH)
       .withGearing(new MechanismGearing(GearBox.fromReductionStages(5, 5, 60.0 / 18.0)))
       .withMotorInverted(false)
-      .withIdleMode(MotorMode.COAST)
+      .withIdleMode(MotorMode.BRAKE)
       .withSoftLimit(Degrees.of(0), Degrees.of(150))
       .withStatorCurrentLimit(Amps.of(40))
       .withClosedLoopRampRate(Seconds.of(0.1))

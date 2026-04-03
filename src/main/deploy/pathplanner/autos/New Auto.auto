@@ -29,91 +29,31 @@
               {
                 "type": "wait",
                 "data": {
-                  "waitTime": 2
+                  "waitTime": 2.5
                 }
               },
               {
-								"type": "named",
-								"data": {
+                "type": "named",
+                "data": {
                   "name": "backfeed"
-									}
-							},
-							{
-                "type": "wait",
-                "data": {
-                  "waitTime": 1
-                }
-              },
-							{
-                "type": "named",
-                "data": {
-                  "name": "feed"
-                }
-              },
-              {
-                "type": "named",
-                "data": {
-                  "name": "STOP"
-                }
-              },
-              {
-                "type": "named",
-                "data": {
-                  "name": "DeployIntake"
                 }
               },
               {
                 "type": "wait",
                 "data": {
-                  "waitTime": 0.75
+                  "waitTime": 1.0
                 }
               },
               {
                 "type": "named",
                 "data": {
-                  "name": "HungryHungryIntake"
-                }
-              },
-              {
-                "type": "path",
-                "data": {
-                  "pathName": "Grab Balls"
-                }
-              },
-              {
-                "type": "path",
-                "data": {
-                  "pathName": "GO BACK AND SHOOT"
-                }
-              },
-              {
-                "type": "named",
-                "data": {
-                  "name": "LimelightTurret"
-                }
-              },
-              {
-                "type": "named",
-                "data": {
-                  "name": "shoot"
-                }
-              },
-              {
-                "type": "wait",
-                "data": {
-                  "waitTime": 0.75
+                  "name": "StopHopper"
                 }
               },
               {
                 "type": "named",
                 "data": {
                   "name": "feed"
-                }
-              },
-              {
-                "type": "wait",
-                "data": {
-                  "waitTime": 5.0
                 }
               },
               {

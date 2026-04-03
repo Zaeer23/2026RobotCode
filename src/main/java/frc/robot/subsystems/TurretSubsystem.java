@@ -23,6 +23,8 @@ import static edu.wpi.first.units.Units.Second;
 import static edu.wpi.first.units.Units.Seconds;
 import static edu.wpi.first.units.Units.Volts;
 import edu.wpi.first.units.measure.Angle;
+import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.Constants;
@@ -83,19 +85,29 @@ public class TurretSubsystem extends SubsystemBase {
   
   // Tracking constants — tune kP if still oscillating/sluggish
   private static final double TRACK_DEADBAND_DEGREES = 0.25;
-  private static final double TRACK_TX_FILTER_ALPHA = 0.35;
-  private static final double TRACK_DISTANCE_FILTER_ALPHA = 0.20;
-  private static final double TRACK_MAX_TARGET_STEP_DEGREES = 4.0;
-  private static final double TRACK_MAX_TX_JUMP_DEGREES = 18.0;
-  private static final int TRACK_JUMP_HOLD_CYCLES = 3;
+  private static final double TRACK_TX_FILTER_ALPHA = 0.18;
+  private static final double TRACK_DISTANCE_FILTER_ALPHA = 0.12;
+  private static final double TRACK_MAX_TARGET_STEP_DEGREES = 2.0;
+  private static final double TRACK_MAX_TX_JUMP_DEGREES = 10.0;
+  private static final double TRACK_MAX_DISTANCE_JUMP_INCHES = 36.0;
+  private static final int TRACK_JUMP_HOLD_CYCLES = 5;
+  private static final int TRACK_MIN_ACQUIRE_SAMPLES = 3;
   private static final double TRACK_LATENCY_FUDGE_MS = 20.0;
 
   private double filteredTrackingTxDegrees = 0.0;
   private double filteredTrackingDistanceInches = 120.0;
   private double lastTrackingTargetAngleDegrees = 0.0;
   private double lastRawTrackingTxDegrees = 0.0;
+  private int lastTrackingTagId = -1;
+  private int consecutiveTrackingSamples = 0;
   private boolean hasTrackingSample = false;
   private int trackingJumpHoldCyclesRemaining = 0;
+  private double lastNoTargetWarningTimestamp = -1.0;
+  private double lastBadDataWarningTimestamp = -1.0;
+  private double lastOutOfRangeWarningTimestamp = -1.0;
+  private double lastTurretConsoleLogTimestamp = -1.0;
+  private int activeTurretAttemptId = -1;
+  private boolean printedTurretHeader = false;
 
 
 
@@ -155,24 +167,33 @@ public class TurretSubsystem extends SubsystemBase {
    * on target distance, then P-control the turret toward corrected TX = 0.
    */
   public Command trackTarget(LimeLight limelight) {
-    return trackTarget(limelight, null);
+    return trackTarget(limelight, null, TRACKING_TAG_IDS);
   }
 
   public Command trackTarget(LimeLight limelight, SwerveSubsystem drivebase) {
+    return trackTarget(limelight, drivebase, TRACKING_TAG_IDS);
+  }
+
+  public Command trackTarget(LimeLight limelight, SwerveSubsystem drivebase, Set<Integer> allowedTagIds) {
     return turret.setAngle(() -> {
-      LimeLight.AprilTagScan scan = limelight.scan(TRACKING_TAG_IDS);
+      LimeLight.AprilTagScan scan = limelight.scan(allowedTagIds);
       double currentAngleDegrees = turret.getAngle().in(Degrees);
+      double nowSeconds = Timer.getFPGATimestamp();
 
       if (!scan.isValid()) {
         filteredTrackingTxDegrees = 0.0;
         filteredTrackingDistanceInches = 120.0;
         lastTrackingTargetAngleDegrees = currentAngleDegrees;
+        lastTrackingTagId = -1;
+        consecutiveTrackingSamples = 0;
         hasTrackingSample = false;
         trackingJumpHoldCyclesRemaining = 0;
         Logger.recordOutput("Turret/TrackingState", "NO_TARGET");
         Logger.recordOutput("Turret/TrackingTagID", -1);
         Logger.recordOutput("Turret/FilteredTX", filteredTrackingTxDegrees);
         Logger.recordOutput("Turret/TrackingTargetAngleDegrees", currentAngleDegrees);
+        reportNoTargetWarning(scan);
+        maybePrintTurretTelemetry(nowSeconds, scan, currentAngleDegrees, currentAngleDegrees, "NO_TARGET");
         return turret.getAngle();
       }
 
@@ -183,17 +204,40 @@ public class TurretSubsystem extends SubsystemBase {
       double visionLatencySeconds = (scan.latencyMs + TRACK_LATENCY_FUDGE_MS) / 1000.0;
       double latencyCompensationDegrees = robotOmegaDegPerSecond * visionLatencySeconds;
       double rawTxDegrees = -(scan.tx + latencyCompensationDegrees);
-      double rawDistanceInches = scan.distance * 39.37;
+      double rawDistanceInches = Math.max(scan.distance * 39.37, 1.0);
+      if (!Double.isFinite(scan.tx) || !Double.isFinite(scan.ty) || !Double.isFinite(scan.distance)) {
+        reportBadVisionDataWarning(scan);
+        maybePrintTurretTelemetry(nowSeconds, scan, currentAngleDegrees, currentAngleDegrees, "BAD_DATA");
+        return turret.getAngle();
+      }
+      boolean tagChanged = scan.tagID != lastTrackingTagId;
+      if (tagChanged) {
+        consecutiveTrackingSamples = 0;
+        hasTrackingSample = false;
+        trackingJumpHoldCyclesRemaining = 0;
+        lastTrackingTagId = scan.tagID;
+      }
+
       if (!hasTrackingSample) {
         filteredTrackingTxDegrees = rawTxDegrees;
-        filteredTrackingDistanceInches = Math.max(rawDistanceInches, 1.0);
+        filteredTrackingDistanceInches = rawDistanceInches;
         lastRawTrackingTxDegrees = rawTxDegrees;
+        consecutiveTrackingSamples++;
+        Logger.recordOutput("Turret/TrackingState", "ACQUIRING");
+        Logger.recordOutput("Turret/TrackingAcquireSamples", consecutiveTrackingSamples);
+        Logger.recordOutput("Turret/TrackingTagID", scan.tagID);
+        maybePrintTurretTelemetry(nowSeconds, scan, currentAngleDegrees, currentAngleDegrees, "ACQUIRING");
+        if (consecutiveTrackingSamples < TRACK_MIN_ACQUIRE_SAMPLES) {
+          return turret.getAngle();
+        }
         hasTrackingSample = true;
       }
         
       // Freeze briefly on unrealistic one-frame jumps instead of commanding a violent reversal.
       double txDeltaDegrees = rawTxDegrees - lastRawTrackingTxDegrees;
-      if (Math.abs(txDeltaDegrees) > TRACK_MAX_TX_JUMP_DEGREES) {
+      double distanceDeltaInches = rawDistanceInches - filteredTrackingDistanceInches;
+      if (Math.abs(txDeltaDegrees) > TRACK_MAX_TX_JUMP_DEGREES
+          || Math.abs(distanceDeltaInches) > TRACK_MAX_DISTANCE_JUMP_INCHES) {
         trackingJumpHoldCyclesRemaining = TRACK_JUMP_HOLD_CYCLES;
       } else if (trackingJumpHoldCyclesRemaining > 0) {
         trackingJumpHoldCyclesRemaining--;
@@ -215,6 +259,7 @@ public class TurretSubsystem extends SubsystemBase {
       double parallaxDegrees = Math.toDegrees(
           Math.atan2(LIMELIGHT_HORIZONTAL_OFFSET_INCHES, filteredTrackingDistanceInches));
       double correctedTargetDegrees = filteredTrackingTxDegrees - parallaxDegrees;
+      reportOutOfRangeTrackingWarning(correctedTargetDegrees, scan.tagID);
 
       // Rate limit the commanded turret angle so fast tag motion cannot cause
       // full-speed reversals from one loop to the next.
@@ -229,20 +274,44 @@ public class TurretSubsystem extends SubsystemBase {
       lastTrackingTargetAngleDegrees = clampedTargetAngleDegrees;
 
       Logger.recordOutput("Turret/RawTX", scan.tx);
+      Logger.recordOutput("Turret/RawDistanceInches", rawDistanceInches);
       Logger.recordOutput("Turret/VisionLatencyMs", scan.latencyMs);
       Logger.recordOutput("Turret/RobotOmegaDegPerSec", robotOmegaDegPerSecond);
       Logger.recordOutput("Turret/LatencyCompensationDegrees", latencyCompensationDegrees);
       Logger.recordOutput("Turret/ClampedTX", rawTxDegrees);
       Logger.recordOutput("Turret/FilteredTX", filteredTrackingTxDegrees);
       Logger.recordOutput("Turret/FilteredDistanceInches", filteredTrackingDistanceInches);
+      Logger.recordOutput("Turret/DistanceJumpInches", distanceDeltaInches);
       Logger.recordOutput("Turret/ParallaxDegrees",   parallaxDegrees);
       Logger.recordOutput("Turret/JumpHoldCycles", trackingJumpHoldCyclesRemaining);
+      Logger.recordOutput("Turret/TrackingAcquireSamples", consecutiveTrackingSamples);
       Logger.recordOutput("Turret/TrackingTagID", scan.tagID);
       Logger.recordOutput("Turret/TargetDistanceM", scan.distance);
       Logger.recordOutput("Turret/TrackingTargetAngleDegrees", clampedTargetAngleDegrees);
       Logger.recordOutput("Turret/TrackingState", "TRACKING");
+      maybePrintTurretTelemetry(
+          nowSeconds,
+          scan,
+          currentAngleDegrees,
+          clampedTargetAngleDegrees,
+          "TRACKING");
 
       return Degrees.of(clampedTargetAngleDegrees);
+    }).beforeStarting(() -> {
+      activeTurretAttemptId = LimelightAttemptTracker.nextAttemptId();
+      lastTurretConsoleLogTimestamp = -1.0;
+      System.out.printf(
+          "LIMELIGHT_ATTEMPT_START,source=TURRET,attempt=%d%n",
+          activeTurretAttemptId);
+    }).finallyDo(() -> {
+      System.out.printf(
+          "LIMELIGHT_ATTEMPT_END,source=TURRET,attempt=%d%n",
+          activeTurretAttemptId);
+      activeTurretAttemptId = -1;
+      lastTurretConsoleLogTimestamp = -1.0;
+      lastNoTargetWarningTimestamp = -1.0;
+      lastBadDataWarningTimestamp = -1.0;
+      lastOutOfRangeWarningTimestamp = -1.0;
     }).withName("Turret.trackTarget");
   }
 
@@ -274,5 +343,84 @@ public class TurretSubsystem extends SubsystemBase {
     @Override
     public void simulationPeriodic() {
       turret.simIterate();
+    }
+
+    private void reportNoTargetWarning(LimeLight.AprilTagScan scan) {
+      double nowSeconds = Timer.getFPGATimestamp();
+      if (lastNoTargetWarningTimestamp < 0 || nowSeconds - lastNoTargetWarningTimestamp >= 1.0) {
+        DriverStation.reportWarning(
+            String.format(
+                "[TURRET][WARN][ATTEMPT %d] Lost/invalid Limelight target while tracking (tagId=%d).",
+                activeTurretAttemptId,
+                scan.tagID),
+            false);
+        lastNoTargetWarningTimestamp = nowSeconds;
+      }
+    }
+
+    private void reportBadVisionDataWarning(LimeLight.AprilTagScan scan) {
+      double nowSeconds = Timer.getFPGATimestamp();
+      if (lastBadDataWarningTimestamp < 0 || nowSeconds - lastBadDataWarningTimestamp >= 1.0) {
+        DriverStation.reportError(
+            String.format(
+                "[TURRET][ERROR][ATTEMPT %d] Limelight returned non-finite data while tracking (tx=%.3f, ty=%.3f, dist=%.3f, tagId=%d).",
+                activeTurretAttemptId,
+                scan.tx,
+                scan.ty,
+                scan.distance,
+                scan.tagID),
+            false);
+        lastBadDataWarningTimestamp = nowSeconds;
+      }
+    }
+
+    private void reportOutOfRangeTrackingWarning(double correctedTargetDegrees, int tagID) {
+      if (Math.abs(correctedTargetDegrees) <= MAX_ONE_DIR_FOV) {
+        return;
+      }
+
+      double nowSeconds = Timer.getFPGATimestamp();
+      if (lastOutOfRangeWarningTimestamp < 0 || nowSeconds - lastOutOfRangeWarningTimestamp >= 1.0) {
+        DriverStation.reportWarning(
+            String.format(
+                "[TURRET][WARN][ATTEMPT %d] Requested target angle %.2f deg exceeds turret range +/-%.1f deg (tagId=%d).",
+                activeTurretAttemptId,
+                correctedTargetDegrees,
+                MAX_ONE_DIR_FOV,
+                tagID),
+            false);
+        lastOutOfRangeWarningTimestamp = nowSeconds;
+      }
+    }
+
+    private void maybePrintTurretTelemetry(
+        double nowSeconds,
+        LimeLight.AprilTagScan scan,
+        double currentAngleDegrees,
+        double targetAngleDegrees,
+        String state) {
+      if (!printedTurretHeader) {
+        System.out.println(
+            "TURRET_TABLE_HEADER,source,attempt,time_s,state,tag_id,raw_tx_deg,filtered_tx_deg,distance_m,current_angle_deg,target_angle_deg");
+        printedTurretHeader = true;
+      }
+
+      if (lastTurretConsoleLogTimestamp >= 0
+          && nowSeconds - lastTurretConsoleLogTimestamp < 0.25) {
+        return;
+      }
+
+      lastTurretConsoleLogTimestamp = nowSeconds;
+      System.out.printf(
+          "TURRET_TABLE_ROW,TURRET,%d,%.3f,%s,%d,%.2f,%.2f,%.3f,%.2f,%.2f%n",
+          activeTurretAttemptId,
+          nowSeconds,
+          state,
+          scan.tagID,
+          scan.tx,
+          filteredTrackingTxDegrees,
+          scan.distance,
+          currentAngleDegrees,
+          targetAngleDegrees);
     }
   }

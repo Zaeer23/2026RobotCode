@@ -26,6 +26,7 @@ import frc.robot.subsystems.swervedrive.SwerveSubsystem;
 public class Superstructure extends SubsystemBase {
 
   private static final Set<Integer> CLIMB_BAR_TAG_IDS = Set.of(15, 16, 31, 32);
+  private static final Set<Integer> HUB_TAG_IDS = Set.of(9, 10, 11, 18, 19, 20);
 
   public final ShooterSubsystem shooter;
   public final TurretSubsystem turret;
@@ -255,6 +256,14 @@ public Command manualTurretControl(Supplier<Double> speedSupplier) {
   public Command climbBarAlignCommand(SwerveSubsystem drivebase) {
     return limelight.alignToTagsCommand(drivebase, CLIMB_BAR_TAG_IDS)
         .withName("Superstructure.climbBarAlign");
+  }
+
+  public Command limelightShootCommand(SwerveSubsystem drivebase) {
+    return Commands.parallel(
+        limelight.alignToTagsCommand(drivebase, HUB_TAG_IDS),
+        shooter.setSpeedFromLimelight(limelight, 45.0, HUB_TAG_IDS),
+        turret.trackTarget(limelight, drivebase, HUB_TAG_IDS))
+        .withName("Superstructure.limelightShoot");
   }
 
 public Command trackTargetCommand(LimeLight limelight) {

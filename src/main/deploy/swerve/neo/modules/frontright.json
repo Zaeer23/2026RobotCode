@@ -12,16 +12,16 @@
   "encoder": {
     "type": "cancoder",
     "id": 20,
-    "canbus": "godzilla"
+    "canbus": "rio"
   },
   "inverted": {
-    "drive": false,
+    "drive": true,
   "angle": true
   },
-  "absoluteEncoderOffset": 318,
+  "absoluteEncoderOffset": null,
 
   "location": {
-    "front": -11,
-    "left": 11
+    "front": 11,
+    "left": -11
   }
 } 

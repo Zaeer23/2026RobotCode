@@ -1,5 +1,6 @@
 package frc.robot.subsystems;
 
+import java.util.Set;
 import java.util.function.Supplier;
 
 import org.littletonrobotics.junction.Logger;
@@ -24,6 +25,8 @@ import static edu.wpi.first.units.Units.Volts;
 import edu.wpi.first.units.measure.AngularVelocity;
 import edu.wpi.first.units.measure.Distance;
 import edu.wpi.first.units.measure.LinearVelocity;
+import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.wpilibj2.command.WaitCommand;
@@ -39,13 +42,16 @@ import yams.motorcontrollers.SmartMotorControllerConfig.MotorMode;
 import yams.motorcontrollers.SmartMotorControllerConfig.TelemetryVerbosity;
 import yams.motorcontrollers.local.SparkWrapper;
 import frc.robot.subsystems.LimeLight;
-import static edu.wpi.first.units.Units.RPM;
 
 public class ShooterSubsystem extends SubsystemBase {
   private static final double SHOOTER_MAX_RPM = 5600.0;
+  private static final double SHOOTER_SPINUP_RPM = 3600.0;
   private static final double LIMELIGHT_SHOT_MIN_RPM = 3200.0;
-  private static final double[] LIMELIGHT_DISTANCE_METERS = {1.0, 1.5, 2.0, 2.5, 3.0, 3.5};
-  private static final double[] LIMELIGHT_DISTANCE_RPM = {3200.0, 3500.0, 3900.0, 4400.0, 5000.0, 5600.0};
+  private static final double LIMELIGHT_REFERENCE_DISTANCE_METERS = 3.5052; // 11 ft 6 in
+  private static final double LIMELIGHT_REFERENCE_RPM = SHOOTER_SPINUP_RPM;
+  private static final double LIMELIGHT_RPM_PER_METER = 650.0;
+  private static final double LIMELIGHT_RPM_TRIM = 50.0;
+  private static final double SHOT_CONSOLE_LOG_PERIOD_SECONDS = 0.25;
 
   private final SparkMax leaderSpark = new SparkMax(Constants.ShooterConstants.kLeaderMotorId,
       MotorType.kBrushless);
@@ -62,18 +68,25 @@ public class ShooterSubsystem extends SubsystemBase {
       .withGearing(new MechanismGearing(GearBox.fromReductionStages(1)))
       .withMotorInverted(false)
       .withIdleMode(MotorMode.COAST)
-      .withStatorCurrentLimit(Amps.of(40));
+      .withStatorCurrentLimit(Amps.of(40))
+      .withClosedLoopRampRate(Seconds.of(0.30))
+      .withOpenLoopRampRate(Seconds.of(0.30));
 
   private final SmartMotorController smc = new SparkWrapper(leaderSpark, DCMotor.getNEO(2), smcConfig);
 
   private final FlyWheelConfig shooterConfig = new FlyWheelConfig(smc)
       .withDiameter(Inches.of(4))
       .withMass(Pounds.of(1))
-      .withUpperSoftLimit(RPM.of(5400))
+      .withUpperSoftLimit(RPM.of(SHOOTER_MAX_RPM))
       .withLowerSoftLimit(RPM.of(0))
       .withTelemetry("Shooter", TelemetryVerbosity.HIGH);
 
   private final FlyWheel shooter = new FlyWheel(shooterConfig);
+  private boolean printedShotHeader = false;
+  private boolean wasLimelightShotValidLastCycle = true;
+  private double lastShotConsoleLogTimestamp = -1.0;
+  private double lastInvalidTargetWarningTimestamp = -1.0;
+  private int activeShooterAttemptId = -1;
 
   public ShooterSubsystem() {
   }
@@ -101,7 +114,7 @@ public Command setPercentAsRPM(Supplier<Double> percentSupplier) {
     ).finallyDo(() -> leaderSpark.set(0));
 }
   public Command spinUp() {
-    return setSpeed(RPM.of(SHOOTER_MAX_RPM));
+    return setSpeed(RPM.of(SHOOTER_SPINUP_RPM));
   }
 
   public Command stop() {
@@ -118,31 +131,85 @@ public Command setPercentAsRPM(Supplier<Double> percentSupplier) {
   }
   
   public Command setSpeedFromLimelight(LimeLight limelight, double fixedLaunchAngleDegrees) {
+    return setSpeedFromLimelight(limelight, fixedLaunchAngleDegrees, null);
+  }
+
+  public Command setSpeedFromLimelight(
+      LimeLight limelight,
+      double fixedLaunchAngleDegrees,
+      Set<Integer> allowedTagIds) {
     return shooter.setSpeed(() -> {
-        if (!limelight.hasTarget()) {
+        double nowSeconds = Timer.getFPGATimestamp();
+        LimeLight.AprilTagScan scan =
+            allowedTagIds == null ? limelight.scan() : limelight.scan(allowedTagIds);
+
+        if (!scan.isValid()) {
             Logger.recordOutput("Shooter/LimelightShotValid", false);
-            Logger.recordOutput("Shooter/LimelightShotMessage", "No Limelight target");
+            Logger.recordOutput("Shooter/LimelightShotMessage", "No valid hub AprilTag target");
             Logger.recordOutput("Shooter/LimelightDistanceMeters", 0.0);
+            Logger.recordOutput("Shooter/LimelightEquationRPM", 0.0);
             Logger.recordOutput("Shooter/LimelightCommandedRPM", 0.0);
+            Logger.recordOutput("Shooter/LimelightTargetTagID", -1);
+            maybeReportInvalidTarget(nowSeconds);
+            wasLimelightShotValidLastCycle = false;
             return RPM.of(0);
         }
 
-        double distanceMeters = estimateTargetDistanceMeters(limelight);
-        double commandedRPM = MathUtil.clamp(
-            rpmForDistanceMeters(distanceMeters), LIMELIGHT_SHOT_MIN_RPM, SHOOTER_MAX_RPM);
+        double distanceMeters = estimateTargetDistanceMeters(scan);
+        double equationRPM = rpmForDistanceMeters(distanceMeters);
+        double commandedRPM = MathUtil.clamp(equationRPM, LIMELIGHT_SHOT_MIN_RPM, SHOOTER_MAX_RPM);
 
         Logger.recordOutput("Shooter/LimelightShotValid", true);
-        Logger.recordOutput("Shooter/LimelightShotMessage", "Distance curve");
-        Logger.recordOutput("Shooter/LimelightEstimatedRPM", commandedRPM);
+        Logger.recordOutput("Shooter/LimelightShotMessage", "Scaled from 11ft 6in reference shot");
+        Logger.recordOutput("Shooter/LimelightEstimatedRPM", equationRPM);
+        Logger.recordOutput("Shooter/LimelightEquationRPM", equationRPM);
         Logger.recordOutput("Shooter/LimelightCommandedRPM", commandedRPM);
         Logger.recordOutput("Shooter/LimelightDistanceMeters", distanceMeters);
+        Logger.recordOutput("Shooter/LimelightReferenceDistanceMeters", LIMELIGHT_REFERENCE_DISTANCE_METERS);
+        Logger.recordOutput("Shooter/LimelightReferenceRPM", LIMELIGHT_REFERENCE_RPM);
+        Logger.recordOutput("Shooter/LimelightRpmPerMeter", LIMELIGHT_RPM_PER_METER);
+        Logger.recordOutput("Shooter/LimelightRpmTrim", LIMELIGHT_RPM_TRIM);
+        Logger.recordOutput("Shooter/LimelightTargetTagID", scan.tagID);
+        maybePrintShotTelemetry(
+            nowSeconds,
+            scan,
+            distanceMeters,
+            equationRPM,
+            commandedRPM,
+            fixedLaunchAngleDegrees);
+        wasLimelightShotValidLastCycle = true;
 
         return RPM.of(commandedRPM);
-    }).finallyDo(() -> leaderSpark.set(0));
+    }).beforeStarting(() -> {
+      activeShooterAttemptId = LimelightAttemptTracker.nextAttemptId();
+      lastShotConsoleLogTimestamp = -1.0;
+      lastInvalidTargetWarningTimestamp = -1.0;
+      wasLimelightShotValidLastCycle = true;
+      System.out.printf(
+          "LIMELIGHT_ATTEMPT_START,source=SHOOTER,attempt=%d%n",
+          activeShooterAttemptId);
+    }).finallyDo(() -> {
+      leaderSpark.set(0);
+      wasLimelightShotValidLastCycle = true;
+      lastShotConsoleLogTimestamp = -1.0;
+      lastInvalidTargetWarningTimestamp = -1.0;
+      System.out.printf(
+          "LIMELIGHT_ATTEMPT_END,source=SHOOTER,attempt=%d%n",
+          activeShooterAttemptId);
+      activeShooterAttemptId = -1;
+    });
 }
 
   private double estimateTargetDistanceMeters(LimeLight limelight) {
-    double ty = limelight.getTY();
+    return estimateTargetDistanceMeters(limelight.scan());
+  }
+
+  private double estimateTargetDistanceMeters(LimeLight.AprilTagScan scan) {
+    if (!scan.isValid()) {
+      return 0.0;
+    }
+
+    double ty = scan.ty;
     double totalAngleRad = Math.toRadians(ProjectileMotion.LIMELIGHT_MOUNT_ANGLE_DEGREES + ty);
     if (Math.abs(totalAngleRad) < 1e-6) {
       return 0.0;
@@ -155,27 +222,12 @@ public Command setPercentAsRPM(Supplier<Double> percentSupplier) {
   }
 
   private double rpmForDistanceMeters(double distanceMeters) {
-    if (distanceMeters <= LIMELIGHT_DISTANCE_METERS[0]) {
-      return LIMELIGHT_DISTANCE_RPM[0];
+    if (distanceMeters <= 0.0) {
+      return 0.0;
     }
 
-    int lastIndex = LIMELIGHT_DISTANCE_METERS.length - 1;
-    if (distanceMeters >= LIMELIGHT_DISTANCE_METERS[lastIndex]) {
-      return LIMELIGHT_DISTANCE_RPM[lastIndex];
-    }
-
-    for (int i = 1; i < LIMELIGHT_DISTANCE_METERS.length; i++) {
-      double upperDistance = LIMELIGHT_DISTANCE_METERS[i];
-      if (distanceMeters <= upperDistance) {
-        double lowerDistance = LIMELIGHT_DISTANCE_METERS[i - 1];
-        double lowerRpm = LIMELIGHT_DISTANCE_RPM[i - 1];
-        double upperRpm = LIMELIGHT_DISTANCE_RPM[i];
-        double t = (distanceMeters - lowerDistance) / (upperDistance - lowerDistance);
-        return lowerRpm + t * (upperRpm - lowerRpm);
-      }
-    }
-
-    return LIMELIGHT_DISTANCE_RPM[lastIndex];
+    double distanceOffsetMeters = distanceMeters - LIMELIGHT_REFERENCE_DISTANCE_METERS;
+    return LIMELIGHT_REFERENCE_RPM + (distanceOffsetMeters * LIMELIGHT_RPM_PER_METER) + LIMELIGHT_RPM_TRIM;
   }
 
   @Override
@@ -187,6 +239,63 @@ public Command setPercentAsRPM(Supplier<Double> percentSupplier) {
   @Override
   public void simulationPeriodic() {
     shooter.simIterate();
+  }
+
+  private void maybeReportInvalidTarget(double nowSeconds) {
+    int attemptId = activeShooterAttemptId;
+    if (wasLimelightShotValidLastCycle) {
+      DriverStation.reportWarning(
+          String.format(
+              "[SHOT][WARN][SHOOTER][ATTEMPT %d] Limelight target invalid during shoot command (no approved tag / no target).",
+              attemptId),
+          false);
+      lastInvalidTargetWarningTimestamp = nowSeconds;
+      return;
+    }
+
+    if (lastInvalidTargetWarningTimestamp < 0
+        || nowSeconds - lastInvalidTargetWarningTimestamp >= 1.5) {
+      DriverStation.reportWarning(
+          String.format(
+              "[SHOT][WARN][SHOOTER][ATTEMPT %d] Still no valid Limelight target while shooter command is active.",
+              attemptId),
+          false);
+      lastInvalidTargetWarningTimestamp = nowSeconds;
+    }
+  }
+
+  private void maybePrintShotTelemetry(
+      double nowSeconds,
+      LimeLight.AprilTagScan scan,
+      double distanceMeters,
+      double equationRPM,
+      double commandedRPM,
+      double fixedLaunchAngleDegrees) {
+    if (!printedShotHeader) {
+      System.out.println(
+          "SHOT_TABLE_HEADER,source,attempt,time_s,tag_id,distance_m,equation_rpm,commanded_rpm,actual_rpm,tx_deg,ty_deg,launch_angle_deg");
+      printedShotHeader = true;
+    }
+
+    if (lastShotConsoleLogTimestamp >= 0
+        && nowSeconds - lastShotConsoleLogTimestamp < SHOT_CONSOLE_LOG_PERIOD_SECONDS) {
+      return;
+    }
+
+    lastShotConsoleLogTimestamp = nowSeconds;
+    double actualRPM = getSpeed().in(RPM);
+    System.out.printf(
+        "SHOT_TABLE_ROW,SHOOTER,%d,%.3f,%d,%.3f,%.1f,%.1f,%.1f,%.2f,%.2f,%.1f%n",
+        activeShooterAttemptId,
+        nowSeconds,
+        scan.tagID,
+        distanceMeters,
+        equationRPM,
+        commandedRPM,
+        actualRPM,
+        scan.tx,
+        scan.ty,
+        fixedLaunchAngleDegrees);
   }
 
   private Distance wheelRadius() {

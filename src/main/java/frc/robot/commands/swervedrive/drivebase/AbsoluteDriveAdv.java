@@ -116,7 +116,7 @@ public class AbsoluteDriveAdv extends Command
       resetHeading = false;
     }
 
-    ChassisSpeeds desiredSpeeds = swerve.getTargetSpeeds(vX.getAsDouble(), vY.getAsDouble(), headingX, headingY);
+    ChassisSpeeds desiredSpeeds = swerve.getTargetSpeeds(-1.0 * vX.getAsDouble(), -1.0 * vY.getAsDouble(), headingX, headingY);
 
     // Limit velocity to prevent tippy
     Translation2d translation = SwerveController.getTranslation2d(desiredSpeeds);
