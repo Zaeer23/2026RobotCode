@@ -1,0 +1,106 @@
+{
+  "name": "2026 Match Dashboard",
+  "build": "2026_MATCH_V3",
+  "notes": [
+    "This is the intended robot-side Shuffleboard layout spec.",
+    "The actual Shuffleboard UI save file is client-side and must be exported from the Shuffleboard app.",
+    "Tab names are versioned so the robot code creates fresh tabs even if old layouts are cached."
+  ],
+  "tabs": [
+    {
+      "name": "2026 Match",
+      "purpose": "Driver glance view with field, robot pose, Limelight lock state, shooter state, and turret health.",
+      "widgets": [
+        { "title": "2026 Field", "type": "Field", "x": 0, "y": 0, "w": 8, "h": 5 },
+        { "title": "Driver Overlay", "type": "Grid", "x": 8, "y": 0, "w": 4, "h": 5 },
+        { "title": "Target Lock", "type": "BooleanBox" },
+        { "title": "Ready", "type": "BooleanBox" },
+        { "title": "Turret Health", "type": "BooleanBox" },
+        { "title": "Target Tag", "type": "Number" },
+        { "title": "Stream", "type": "TextView" },
+        { "title": "TX", "type": "Number" },
+        { "title": "TY", "type": "Number" },
+        { "title": "Distance", "type": "Number" },
+        { "title": "Latency", "type": "Number" },
+        { "title": "Turret Deg", "type": "Dial" },
+        { "title": "Shooter RPM", "type": "NumberBar" },
+        { "title": "Speed", "type": "NumberBar" },
+        { "title": "Field Zone", "type": "TextView" }
+      ],
+      "fieldObjects": [
+        "Robot",
+        "Robot Ghost",
+        "Limelight Target",
+        "Aim Line",
+        "Home Marker",
+        "Mid Marker",
+        "Opponent Marker"
+      ]
+    },
+    {
+      "name": "2026 Shooting",
+      "purpose": "Live Limelight feed, shot solution, readiness, and turret tracking diagnostics.",
+      "widgets": [
+        { "title": "Vision Status", "type": "TextView", "x": 0, "y": 0, "w": 4, "h": 1 },
+        { "title": "Limelight Feed", "type": "Grid", "x": 0, "y": 1, "w": 4, "h": 4 },
+        { "title": "Has Target", "type": "BooleanBox" },
+        { "title": "Target Count", "type": "Number" },
+        { "title": "TX (deg)", "type": "Number" },
+        { "title": "TY (deg)", "type": "Number" },
+        { "title": "Distance (m)", "type": "Number" },
+        { "title": "AprilTag ID", "type": "Number" },
+        { "title": "Latency (ms)", "type": "Number" },
+        { "title": "Stream", "type": "TextView" },
+        { "title": "Shot Solution", "type": "Grid", "x": 4, "y": 1, "w": 4, "h": 4 },
+        { "title": "Solution Valid", "type": "BooleanBox" },
+        { "title": "Ready to Shoot", "type": "BooleanBox" },
+        { "title": "Turret Cmd (deg)", "type": "Number" },
+        { "title": "Launch Angle (deg)", "type": "Number" },
+        { "title": "Calc Distance (m)", "type": "Number" },
+        { "title": "Target RPM", "type": "Number" },
+        { "title": "Solver Message", "type": "TextView", "x": 0, "y": 5, "w": 8, "h": 1 },
+        { "title": "Turret Hardware", "type": "List", "x": 8, "y": 1, "w": 2, "h": 6 },
+        { "title": "Raw Encoder Rot", "type": "Number" },
+        { "title": "YAMS Deg", "type": "Number" },
+        { "title": "Last Output", "type": "Number" },
+        { "title": "Tracking Healthy", "type": "BooleanBox" },
+        { "title": "Track Tag", "type": "Number" },
+        { "title": "Track Error", "type": "Number" },
+        { "title": "Track Age (s)", "type": "Number" }
+      ]
+    },
+    {
+      "name": "2026 Drive",
+      "purpose": "Robot pose and velocity view with field.",
+      "widgets": [
+        { "title": "Field", "type": "Field", "x": 0, "y": 0, "w": 5, "h": 3 },
+        { "title": "Robot Pose", "type": "List", "x": 5, "y": 0, "w": 2, "h": 3 },
+        { "title": "X (m)", "type": "Number" },
+        { "title": "Y (m)", "type": "Number" },
+        { "title": "Heading (deg)", "type": "Number" },
+        { "title": "Velocity", "type": "List", "x": 5, "y": 3, "w": 2, "h": 3 },
+        { "title": "Vx (m/s)", "type": "Number" },
+        { "title": "Vy (m/s)", "type": "Number" },
+        { "title": "Speed (m/s)", "type": "NumberBar" }
+      ]
+    },
+    {
+      "name": "2026 Pre-Match",
+      "purpose": "Station checks and subsystem readiness before the match.",
+      "widgets": [
+        { "title": "Station and Alliance", "type": "List", "x": 0, "y": 0, "w": 2, "h": 4 },
+        { "title": "Alliance", "type": "TextView" },
+        { "title": "DS Number", "type": "Number" },
+        { "title": "FMS Connected", "type": "BooleanBox" },
+        { "title": "Subsystem Readiness", "type": "List", "x": 2, "y": 0, "w": 2, "h": 5 },
+        { "title": "Shooter Motor OK", "type": "BooleanBox" },
+        { "title": "Turret Motor OK", "type": "BooleanBox" },
+        { "title": "Limelight Connected", "type": "BooleanBox" },
+        { "title": "Odometry Valid", "type": "BooleanBox" },
+        { "title": "Turret Angle (deg)", "type": "Dial", "x": 4, "y": 0, "w": 2, "h": 2 },
+        { "title": "Shooter RPM", "type": "NumberBar", "x": 4, "y": 2, "w": 2, "h": 1 },
+        { "title": "Hood Angle (deg)", "type": "Number", "x": 4, "y": 3, "w": 2, "h": 1 }
+      ]
+    }
+  ]
+}

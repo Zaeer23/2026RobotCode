@@ -51,7 +51,7 @@ public final class Constants
     public static final double TURN_CONSTANT    = 6;
   }
   public static class ClimberConstants {
-    public static final int kClimberMotorId = 366; 
+    public static final int kClimberMotorId = 36; 
     public static final double kClimberSpeed = 0.8; 
   }
    

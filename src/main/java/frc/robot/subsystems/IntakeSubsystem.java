@@ -4,6 +4,7 @@ import com.revrobotics.spark.SparkMax;
 import com.revrobotics.spark.SparkLowLevel.MotorType;
 
 // Removed ThriftyNova import
+import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.controller.SimpleMotorFeedforward;
 import edu.wpi.first.math.system.plant.DCMotor;
 import static edu.wpi.first.units.Units.Amps;
@@ -20,6 +21,7 @@ import java.util.function.DoubleSupplier;
 import java.util.function.Supplier;
 
 import edu.wpi.first.units.measure.Angle;
+import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
@@ -40,6 +42,14 @@ import yams.motorcontrollers.local.SparkWrapper; // Only need SparkWrapper now
 public class IntakeSubsystem extends SubsystemBase {
 
   private static final double INTAKE_SPEED = 1.0;
+  private static final double PIVOT_STOW_DEGREES = 90.0;
+  private static final double PIVOT_DEPLOY_DEGREES = 90.0;
+  private static final double PIVOT_MIN_DEGREES = 0.0;
+  private static final double PIVOT_MAX_DEGREES = 90.0;
+  private static final double PIVOT_JOYSTICK_THRESHOLD = 0.25;
+  private static final double PIVOT_BOUNCE_HIGH_DEGREES = 23.0;
+  private static final double PIVOT_BOUNCE_LOW_DEGREES = 0.0;
+  private static final double PIVOT_BOUNCE_PERIOD_SECONDS = 0.18;
 
   // 1. Changed roller motor to SparkMax with Brushless (NEO) type
   private final SparkMax rollerMotor = new SparkMax(Constants.IntakeConstants.kRollerMotorId, MotorType.kBrushless);
@@ -74,7 +84,7 @@ public class IntakeSubsystem extends SubsystemBase {
       .withGearing(new MechanismGearing(GearBox.fromReductionStages(5, 5, 60.0 / 18.0)))
       .withMotorInverted(false)
       .withIdleMode(MotorMode.BRAKE)
-      .withSoftLimit(Degrees.of(0), Degrees.of(150))
+      .withSoftLimit(Degrees.of(PIVOT_MIN_DEGREES), Degrees.of(PIVOT_MAX_DEGREES))
       .withStatorCurrentLimit(Amps.of(40))
       .withClosedLoopRampRate(Seconds.of(0.1))
       .withOpenLoopRampRate(Seconds.of(0.1));
@@ -86,15 +96,16 @@ public class IntakeSubsystem extends SubsystemBase {
       intakePivotSmartMotorConfig);
 
   private final ArmConfig intakePivotConfig = new ArmConfig(intakePivotController)
-      .withSoftLimits(Degrees.of(0), Degrees.of(150))
-      .withHardLimit(Degrees.of(0), Degrees.of(155))
-      .withStartingPosition(Degrees.of(0))
+      .withSoftLimits(Degrees.of(PIVOT_MIN_DEGREES), Degrees.of(PIVOT_MAX_DEGREES))
+      .withHardLimit(Degrees.of(PIVOT_MIN_DEGREES), Degrees.of(PIVOT_MAX_DEGREES + 5.0))
+      .withStartingPosition(Degrees.of(PIVOT_STOW_DEGREES))
       .withLength(Feet.of(1))
       .withMass(Pounds.of(2))
       .withTelemetry("IntakePivot", TelemetryVerbosity.HIGH);
       
 
   private final Arm intakePivot = new Arm(intakePivotConfig);
+  private double joystickPivotTargetDegrees = PIVOT_STOW_DEGREES;
 
    public Command setPercent(Supplier<Double> percentSupplier) {
     return Commands.runOnce(() -> {}) // no requirement
@@ -114,7 +125,9 @@ public class IntakeSubsystem extends SubsystemBase {
   }
 
   public Command setPivotAngle(Angle angle) {
-    return intakePivot.setAngle(angle).withName("IntakePivot.SetAngle");
+    return intakePivot.setAngle(() -> Degrees.of(
+        MathUtil.clamp(angle.in(Degrees), PIVOT_MIN_DEGREES, PIVOT_MAX_DEGREES)))
+        .withName("IntakePivot.SetAngle");
   }
 
   public Command rezero() {
@@ -149,20 +162,42 @@ public class IntakeSubsystem extends SubsystemBase {
         .withName("IntakePivot.Manual");
 }
 
+  public Command joystickPivotTwoPosition(DoubleSupplier pSupplier) {
+    return Commands.run(() -> {
+      double input = pSupplier.getAsDouble();
+      if (input > PIVOT_JOYSTICK_THRESHOLD) {
+        joystickPivotTargetDegrees = PIVOT_MIN_DEGREES;
+      } else if (input < -PIVOT_JOYSTICK_THRESHOLD) {
+        joystickPivotTargetDegrees = PIVOT_STOW_DEGREES;
+      }
+      intakePivotController.setPosition(Degrees.of(joystickPivotTargetDegrees));
+    }, this).withName("IntakePivot.JoystickTwoPosition");
+  }
+
+  public Command pivotBounceWhileFeedingCommand() {
+    return Commands.run(() -> {
+      double phaseSeconds = Timer.getFPGATimestamp() % PIVOT_BOUNCE_PERIOD_SECONDS;
+      boolean highPhase = phaseSeconds < (PIVOT_BOUNCE_PERIOD_SECONDS / 2.0);
+      double targetDegrees = highPhase ? PIVOT_BOUNCE_HIGH_DEGREES : PIVOT_BOUNCE_LOW_DEGREES;
+      intakePivotController.setPosition(Degrees.of(targetDegrees));
+    }, this).finallyDo(() -> intakePivotController.setPosition(Degrees.of(PIVOT_MIN_DEGREES)))
+        .withName("IntakePivot.BounceWhileFeeding");
+  }
+
   private void setIntakeStow() {
-    intakePivotController.setPosition(Degrees.of(0));
+    intakePivotController.setPosition(Degrees.of(PIVOT_STOW_DEGREES));
   }
 
   private void setIntakeFeed() {
-    intakePivotController.setPosition(Degrees.of(59));
+    intakePivotController.setPosition(Degrees.of(PIVOT_DEPLOY_DEGREES));
   }
 
   private void setIntakeHold() {
-    intakePivotController.setPosition(Degrees.of(115));
+    intakePivotController.setPosition(Degrees.of(PIVOT_STOW_DEGREES));
   }
 
   private void setIntakeDeployed() {
-    intakePivotController.setPosition(Degrees.of(148));
+    intakePivotController.setPosition(Degrees.of(PIVOT_DEPLOY_DEGREES));
   }
 
   @Override

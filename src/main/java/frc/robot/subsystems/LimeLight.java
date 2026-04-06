@@ -8,12 +8,14 @@ import edu.wpi.first.math.geometry.Rotation3d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.geometry.Translation3d;
 import edu.wpi.first.net.PortForwarder;
+import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import frc.robot.subsystems.swervedrive.SwerveSubsystem;
 import edu.wpi.first.networktables.NetworkTable;
 import edu.wpi.first.networktables.NetworkTableEntry;
 import edu.wpi.first.networktables.NetworkTableInstance;
+import org.littletonrobotics.junction.Logger;
 
 /*
 
@@ -64,12 +66,20 @@ public class LimeLight {
     private double lastClimbForward = 0.0;
     private boolean hasClimbAlignSample = false;
     private int climbJumpHoldCyclesRemaining = 0;
+    private static final double SCAN_CACHE_PERIOD_SECONDS = 0.02;
     private static final int RAW_FIDUCIAL_STRIDE = 7;
     private static final int RAW_FIDUCIAL_ID_INDEX = 0;
     private static final int RAW_FIDUCIAL_TX_INDEX = 1;
     private static final int RAW_FIDUCIAL_TY_INDEX = 2;
     private static final int RAW_FIDUCIAL_TA_INDEX = 3;
     private static final int RAW_FIDUCIAL_DISTANCE_INDEX = 4;
+    private static final double MIN_REASONABLE_TAG_DISTANCE_METERS = 0.15;
+    private static final double MAX_REASONABLE_TAG_DISTANCE_METERS = 20.0;
+    private AprilTagScan cachedAnyScan = new AprilTagScan(false, -1, 0.0, 0.0, 0.0, 0.0, new Pose3d());
+    private double cachedTa = 0.0;
+    private double cachedTv = 0.0;
+    private double[] cachedRawFiducials = new double[0];
+    private double lastScanCacheTimestampSeconds = -1.0;
 
     public LimeLight(String name) {
         table = NetworkTableInstance.getDefault().getTable(name);
@@ -87,23 +97,25 @@ public class LimeLight {
     //some bic data access thingymabobies
 
     public boolean hasTarget() {
-        return tvEntry.getDouble(0) == 1;
+        refreshScanCacheIfNeeded();
+        return cachedTv == 1;
     }
 
     public double getTX() {
-        return txEntry.getDouble(0);
+        return scan().tx;
     }
 
     public double getTY() {
-        return tyEntry.getDouble(0);
+        return scan().ty;
     }
 
     public double getTA() {
-        return taEntry.getDouble(0);
+        refreshScanCacheIfNeeded();
+        return cachedTa;
     }
 
     public int getTagID() {
-        return (int) tidEntry.getDouble(-1);
+        return scan().tagID;
     }
 
     public void lightMode(int number) {
@@ -387,56 +399,107 @@ public class LimeLight {
 }
 
 public AprilTagScan scan() {
-    AprilTagScan closestScan = scanClosestFiducial(null);
+    refreshScanCacheIfNeeded();
+    AprilTagScan closestScan = scanClosestFiducialFromCache(null);
     if (closestScan != null) {
       return closestScan;
     }
 
-    boolean target = tvEntry.getDouble(0) == 1;
-    double tx = txEntry.getDouble(0);
-    double ty = tyEntry.getDouble(0);
-    double ta = taEntry.getDouble(0);
-    int tagId = (int) tidEntry.getDouble(-1);
-    double distance = target ? calculateDistanceFromArea(ta) : 0.0;
-    double latencyMs = tlEntry.getDouble(0.0) + clEntry.getDouble(0.0);
-    Pose3d pose = (target && distance > 0.0) ? calculatePoseFromAngles(tx, ty, distance) : new Pose3d();
+    return cachedAnyScan;
+}
 
-    return new AprilTagScan(
-        target,
-        tagId,
-        tx,
-        ty,
-        distance,
-        latencyMs,
-        pose
-    );
-    
+public AprilTagScan scanContinuous() {
+    refreshScanCacheIfNeeded();
+    return cachedAnyScan;
 }
 
 public AprilTagScan scan(Set<Integer> allowedTagIds) {
-    AprilTagScan closestScan = scanClosestFiducial(allowedTagIds);
+    refreshScanCacheIfNeeded();
+    AprilTagScan closestScan = scanClosestFiducialFromCache(allowedTagIds);
     if (closestScan != null) {
         return closestScan;
     }
 
-    AprilTagScan scan = scan();
-    if (!scan.isValid() || allowedTagIds.contains(scan.tagID)) {
-        return scan;
+    if (!cachedAnyScan.isValid() || allowedTagIds.contains(cachedAnyScan.tagID)) {
+        return cachedAnyScan;
     }
 
     return new AprilTagScan(
         false,
         -1,
-        scan.tx,
-        scan.ty,
+        cachedAnyScan.tx,
+        cachedAnyScan.ty,
         0.0,
-        scan.latencyMs,
+        cachedAnyScan.latencyMs,
         new Pose3d()
     );
 }
 
-private AprilTagScan scanClosestFiducial(Set<Integer> allowedTagIds) {
-    double[] raw = rawFiducialsEntry.getDoubleArray(new double[0]);
+public AprilTagScan scanDirect() {
+    return scanDirect(null);
+}
+
+public AprilTagScan scanDirect(Set<Integer> allowedTagIds) {
+    double tv = tvEntry.getDouble(0);
+    double tx = txEntry.getDouble(0);
+    double ty = tyEntry.getDouble(0);
+    double ta = taEntry.getDouble(0);
+    int tagId = (int) tidEntry.getDouble(-1);
+    double latencyMs = tlEntry.getDouble(0.0) + clEntry.getDouble(0.0);
+    double distance = tv == 1 ? calculateDistanceFromArea(ta) : 0.0;
+    if (!Double.isFinite(distance)
+        || distance < MIN_REASONABLE_TAG_DISTANCE_METERS
+        || distance > MAX_REASONABLE_TAG_DISTANCE_METERS) {
+      distance = 0.0;
+    }
+    Pose3d pose = (tv == 1 && distance > 0.0)
+        ? calculatePoseFromAngles(tx, ty, distance)
+        : new Pose3d();
+    AprilTagScan anyScan = new AprilTagScan(
+        tv == 1,
+        tagId,
+        tx,
+        ty,
+        distance,
+        latencyMs,
+        pose);
+
+    double[] rawFiducials = rawFiducialsEntry.getDoubleArray(new double[0]);
+    AprilTagScan closestScan = scanClosestFiducialFromRaw(rawFiducials, allowedTagIds, latencyMs);
+    AprilTagScan result;
+    if (closestScan != null) {
+      result = closestScan;
+    } else if (!anyScan.isValid() || allowedTagIds == null || allowedTagIds.contains(anyScan.tagID)) {
+      result = anyScan;
+    } else {
+      result = new AprilTagScan(
+          false,
+          -1,
+          anyScan.tx,
+          anyScan.ty,
+          0.0,
+          anyScan.latencyMs,
+          new Pose3d());
+    }
+
+    Logger.recordOutput("Limelight/Direct/HasTarget", result.hasTarget);
+    Logger.recordOutput("Limelight/Direct/TagID", result.tagID);
+    Logger.recordOutput("Limelight/Direct/TX", result.tx);
+    Logger.recordOutput("Limelight/Direct/TY", result.ty);
+    Logger.recordOutput("Limelight/Direct/DistanceM", result.distance);
+    Logger.recordOutput("Limelight/Direct/LatencyMs", result.latencyMs);
+    Logger.recordOutput("Limelight/Direct/RawFiducialArrayLength", rawFiducials.length);
+    return result;
+}
+
+private AprilTagScan scanClosestFiducialFromCache(Set<Integer> allowedTagIds) {
+    return scanClosestFiducialFromRaw(cachedRawFiducials, allowedTagIds, getTotalLatencyMs());
+}
+
+private AprilTagScan scanClosestFiducialFromRaw(
+    double[] raw,
+    Set<Integer> allowedTagIds,
+    double latencyMs) {
     if (raw.length < RAW_FIDUCIAL_STRIDE) {
         return null;
     }
@@ -462,7 +525,15 @@ private AprilTagScan scanClosestFiducial(Set<Integer> allowedTagIds) {
         if (!Double.isFinite(distanceMeters) || distanceMeters <= 0.0) {
             distanceMeters = calculateDistanceFromArea(ta);
         }
-        if (!Double.isFinite(distanceMeters) || distanceMeters <= 0.0) {
+        if (!Double.isFinite(distanceMeters)
+            || distanceMeters < MIN_REASONABLE_TAG_DISTANCE_METERS
+            || distanceMeters > MAX_REASONABLE_TAG_DISTANCE_METERS) {
+            distanceMeters = calculateDistanceFromArea(ta);
+        }
+        if (!Double.isFinite(distanceMeters)
+            || distanceMeters <= 0.0
+            || distanceMeters < MIN_REASONABLE_TAG_DISTANCE_METERS
+            || distanceMeters > MAX_REASONABLE_TAG_DISTANCE_METERS) {
             continue;
         }
 
@@ -487,8 +558,115 @@ private AprilTagScan scanClosestFiducial(Set<Integer> allowedTagIds) {
         bestTx,
         bestTy,
         bestDistanceMeters,
-        getTotalLatencyMs(),
+        latencyMs,
         pose);
+}
+
+private void refreshScanCacheIfNeeded() {
+    double nowSeconds = Timer.getFPGATimestamp();
+    if (lastScanCacheTimestampSeconds >= 0.0
+        && nowSeconds - lastScanCacheTimestampSeconds < SCAN_CACHE_PERIOD_SECONDS) {
+      return;
+    }
+
+    cachedTv = tvEntry.getDouble(0);
+    double tx = txEntry.getDouble(0);
+    double ty = tyEntry.getDouble(0);
+    cachedTa = taEntry.getDouble(0);
+    int tagId = (int) tidEntry.getDouble(-1);
+    double latencyMs = tlEntry.getDouble(0.0) + clEntry.getDouble(0.0);
+    double distance = cachedTv == 1 ? calculateDistanceFromArea(cachedTa) : 0.0;
+    if (!Double.isFinite(distance)
+        || distance < MIN_REASONABLE_TAG_DISTANCE_METERS
+        || distance > MAX_REASONABLE_TAG_DISTANCE_METERS) {
+      distance = 0.0;
+    }
+    Pose3d pose = (cachedTv == 1 && distance > 0.0)
+        ? calculatePoseFromAngles(tx, ty, distance)
+        : new Pose3d();
+    cachedAnyScan = new AprilTagScan(
+        cachedTv == 1,
+        tagId,
+        tx,
+        ty,
+        distance,
+        latencyMs,
+        pose);
+    cachedRawFiducials = rawFiducialsEntry.getDoubleArray(new double[0]);
+    lastScanCacheTimestampSeconds = nowSeconds;
+
+    Logger.recordOutput("Limelight/Cached/HasTarget", cachedAnyScan.hasTarget);
+    Logger.recordOutput("Limelight/Cached/TagID", cachedAnyScan.tagID);
+    Logger.recordOutput("Limelight/Cached/TX", cachedAnyScan.tx);
+    Logger.recordOutput("Limelight/Cached/TY", cachedAnyScan.ty);
+    Logger.recordOutput("Limelight/Cached/TA", cachedTa);
+    Logger.recordOutput("Limelight/Cached/DistanceM", cachedAnyScan.distance);
+    Logger.recordOutput("Limelight/Cached/LatencyMs", cachedAnyScan.latencyMs);
+    Logger.recordOutput("Limelight/Cached/RawFiducialArrayLength", cachedRawFiducials.length);
+    Logger.recordOutput("Limelight/Cached/TvTidConsistent", !(cachedAnyScan.hasTarget && cachedAnyScan.tagID == -1));
+    logRawFiducialDiagnostics();
+}
+
+private void logRawFiducialDiagnostics() {
+    int rawArrayLength = cachedRawFiducials.length;
+    int candidateCount = 0;
+    int finiteDistanceCount = 0;
+    int fallbackDistanceCount = 0;
+    int usableCount = 0;
+    int rejectedByDistanceCount = 0;
+    int rejectedByInvalidCount = 0;
+    int bestTagId = -1;
+    double bestDistanceMeters = Double.POSITIVE_INFINITY;
+    double bestTx = 0.0;
+    double bestTy = 0.0;
+
+    for (int i = 0; i + RAW_FIDUCIAL_STRIDE - 1 < rawArrayLength; i += RAW_FIDUCIAL_STRIDE) {
+      candidateCount++;
+      int tagId = (int) cachedRawFiducials[i + RAW_FIDUCIAL_ID_INDEX];
+      double tx = cachedRawFiducials[i + RAW_FIDUCIAL_TX_INDEX];
+      double ty = cachedRawFiducials[i + RAW_FIDUCIAL_TY_INDEX];
+      double ta = cachedRawFiducials[i + RAW_FIDUCIAL_TA_INDEX];
+      double distanceMeters = cachedRawFiducials[i + RAW_FIDUCIAL_DISTANCE_INDEX];
+
+      if (Double.isFinite(distanceMeters) && distanceMeters > 0.0) {
+        finiteDistanceCount++;
+      } else {
+        distanceMeters = calculateDistanceFromArea(ta);
+        fallbackDistanceCount++;
+      }
+
+      if (!Double.isFinite(distanceMeters) || distanceMeters <= 0.0) {
+        rejectedByInvalidCount++;
+        continue;
+      }
+
+      if (distanceMeters < MIN_REASONABLE_TAG_DISTANCE_METERS
+          || distanceMeters > MAX_REASONABLE_TAG_DISTANCE_METERS) {
+        rejectedByDistanceCount++;
+        continue;
+      }
+
+      usableCount++;
+      if (distanceMeters < bestDistanceMeters) {
+        bestDistanceMeters = distanceMeters;
+        bestTagId = tagId;
+        bestTx = tx;
+        bestTy = ty;
+      }
+    }
+
+    Logger.recordOutput("Limelight/RawFiducials/CandidateCount", candidateCount);
+    Logger.recordOutput("Limelight/RawFiducials/FiniteDistanceCount", finiteDistanceCount);
+    Logger.recordOutput("Limelight/RawFiducials/FallbackDistanceCount", fallbackDistanceCount);
+    Logger.recordOutput("Limelight/RawFiducials/UsableCount", usableCount);
+    Logger.recordOutput("Limelight/RawFiducials/RejectedByDistanceCount", rejectedByDistanceCount);
+    Logger.recordOutput("Limelight/RawFiducials/RejectedByInvalidCount", rejectedByInvalidCount);
+    Logger.recordOutput("Limelight/RawFiducials/ClosestTagId", bestTagId);
+    Logger.recordOutput(
+        "Limelight/RawFiducials/ClosestDistanceM",
+        bestTagId == -1 ? 0.0 : bestDistanceMeters);
+    Logger.recordOutput("Limelight/RawFiducials/ClosestTx", bestTx);
+    Logger.recordOutput("Limelight/RawFiducials/ClosestTy", bestTy);
 }
 
 }

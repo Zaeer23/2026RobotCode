@@ -32,6 +32,7 @@ import frc.robot.subsystems.Superstructure;
 import frc.robot.subsystems.ClimberSubsystem;
 import frc.robot.subsystems.HoodSubsystem;
 import frc.robot.subsystems.ShooterSubsystem;
+import frc.robot.subsystems.ShuffleboardManager;
 import frc.robot.subsystems.TurretSubsystem;
 import frc.robot.subsystems.KickerSubsystem;
 
@@ -121,6 +122,9 @@ private final ClimberSubsystem m_climber = new ClimberSubsystem();
 private final Superstructure m_superstructure = new Superstructure(
     m_shooter, m_turret, m_hood, m_intake, m_hopper, m_kicker, m_limelight
 );
+private final ShuffleboardManager m_shuffleboard = new ShuffleboardManager(
+    m_limelight, m_superstructure, drivebase, m_turret
+);
 
   public RobotContainer()
   {
@@ -135,7 +139,7 @@ private final Superstructure m_superstructure = new Superstructure(
   public void configureSubSystemKeys()
   {
     shooterXbox.a().whileTrue(m_superstructure.feedAllCommand());
-    shooterXbox.y().whileTrue(m_turret.trackTarget(m_limelight, drivebase));
+    shooterXbox.y().whileTrue(Commands.none());
     driverXbox.y().whileTrue(m_limelight.alignCommand(drivebase));
     shooterXbox.povLeft().onTrue(m_shooter.decreaseLimelightPowerForLastShotCommand());
     shooterXbox.povRight().onTrue(m_shooter.increaseLimelightPowerForLastShotCommand());
@@ -146,17 +150,15 @@ private final Superstructure m_superstructure = new Superstructure(
             () -> shooterXbox.getHID().setRumble(RumbleType.kBothRumble, 0.0))
             .ignoringDisable(true));
     
-    m_turret.setDefaultCommand(
-    m_superstructure.manualTurretControl(() -> {
-        double input = shooterXbox.getRightX();
-        if (Math.abs(input) < 0.1) return 0.0;
-        return Math.copySign(input * input, input);
-    })
-);
+    m_turret.setDefaultCommand(m_turret.trackTarget(m_limelight, drivebase));
+    new Trigger(() -> Math.abs(shooterXbox.getRightX()) > 0.12)
+        .whileTrue(m_superstructure.manualTurretControl(() -> {
+          double input = shooterXbox.getRightX();
+          return Math.copySign(input * input, input);
+        }));
 
 m_intake.setDefaultCommand(
-    m_intake.manualPivot(() -> 
-    -shooterXbox.getLeftY())
+    m_intake.joystickPivotTwoPosition(() -> -shooterXbox.getLeftY())
 );
     shooterXbox.x().whileTrue(m_hopper.backFeedCommand());
 
@@ -168,7 +170,7 @@ m_intake.setDefaultCommand(
     Trigger shooterSpinupTrigger = new Trigger(() -> shooterXbox.getRightTriggerAxis() > 0.10);
     shooterSpinupTrigger.whileTrue(m_shooter.spinUp());
     shooterSpinupTrigger.onFalse(m_shooter.stop());
-shooterXbox.b().whileTrue(m_intake.intakeCommand());
+shooterXbox.b().whileTrue(m_superstructure.intakeCommand());
 
     }
   
@@ -279,6 +281,11 @@ shooterXbox.b().whileTrue(m_intake.intakeCommand());
   public void setMotorBrake(boolean brake)
   {
     drivebase.setMotorBrake(brake);
+  }
+
+  public void updateShuffleboard()
+  {
+    m_shuffleboard.update();
   }
 
   private ChassisSpeeds getScaledRobotRelativeDrive()

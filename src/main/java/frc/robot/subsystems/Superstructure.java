@@ -209,7 +209,7 @@ public Command manualTurretControl(Supplier<Double> speedSupplier) {
    * Command to run the intake while held.
    */
   public Command intakeCommand() {
-    return intake.intakeCommand().withName("Superstructure.intake");
+    return intake.deployAndRollCommand().withName("Superstructure.intake");
   }
 
   /**
@@ -260,9 +260,8 @@ public Command manualTurretControl(Supplier<Double> speedSupplier) {
 
   public Command limelightShootCommand(SwerveSubsystem drivebase) {
     return Commands.parallel(
-        limelight.alignToTagsCommand(drivebase, HUB_TAG_IDS),
         shooter.setSpeedFromLimelight(limelight, 45.0, HUB_TAG_IDS),
-        turret.trackTarget(limelight, drivebase, HUB_TAG_IDS))
+        turret.trackTarget(limelight, drivebase))
         .withName("Superstructure.limelightShoot");
   }
 
@@ -276,7 +275,8 @@ public Command trackTargetCommand(LimeLight limelight) {
   public Command feedAllCommand() {
     return Commands.parallel(
         hopper.feedCommand().asProxy(),
-        kicker.feedCommand().asProxy()).withName("Superstructure.feedAll");
+        kicker.feedCommand().asProxy(),
+        intake.pivotBounceWhileFeedingCommand().asProxy()).withName("Superstructure.feedAll");
     // intake.setPivotAngle(Degrees.of(46)).asProxy()).withName("Superstructure.feedAll");
   }
 
