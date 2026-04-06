@@ -10,12 +10,10 @@ import frc.robot.subsystems.LimeLight;
 import frc.robot.subsystems.ShooterSubsystem;
 
 public class ShootingCommand extends SequentialCommandGroup {
-  private static final double SPINUP_SECONDS = 2.0;
-  private static final double FIRST_FEED_SECONDS = 2.50;
-  private static final double FIRST_BACKFEED_SECONDS = 1.00;
+  private static final double SPINUP_SECONDS = 1.50;
+  private static final double FIRST_FEED_SECONDS = 17;
   private static final double STOP_BACKFEED_SECONDS = 1.00;
   private static final double SECOND_FEED_SECONDS = 1.00;
-  private static final double SECOND_BACKFEED_SECONDS = 1.00;
 
   public ShootingCommand(
       ShooterSubsystem shooter,
@@ -26,7 +24,7 @@ public class ShootingCommand extends SequentialCommandGroup {
     addCommands(
         Commands.deadline(
             Commands.waitSeconds(SPINUP_SECONDS),
-            shooter.setSpeedFromLimelight(limelight, 45.0, hubTagIds)),
+            shooter.spinUp()),
         Commands.deadline(
             Commands.waitSeconds(FIRST_FEED_SECONDS),
             shooter.setSpeedFromLimelight(limelight, 45.0, hubTagIds),

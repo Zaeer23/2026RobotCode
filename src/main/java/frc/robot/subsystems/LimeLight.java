@@ -56,6 +56,7 @@ public class LimeLight {
     private final NetworkTableEntry tidEntry;
     private final NetworkTableEntry tlEntry;
     private final NetworkTableEntry clEntry;
+    private final NetworkTableEntry rawFiducialsEntry;
     private final NetworkTableEntry ledModeEntry;
     private double filteredClimbTxDegrees = 0.0;
     private double filteredClimbArea = 0.0;
@@ -63,6 +64,12 @@ public class LimeLight {
     private double lastClimbForward = 0.0;
     private boolean hasClimbAlignSample = false;
     private int climbJumpHoldCyclesRemaining = 0;
+    private static final int RAW_FIDUCIAL_STRIDE = 7;
+    private static final int RAW_FIDUCIAL_ID_INDEX = 0;
+    private static final int RAW_FIDUCIAL_TX_INDEX = 1;
+    private static final int RAW_FIDUCIAL_TY_INDEX = 2;
+    private static final int RAW_FIDUCIAL_TA_INDEX = 3;
+    private static final int RAW_FIDUCIAL_DISTANCE_INDEX = 4;
 
     public LimeLight(String name) {
         table = NetworkTableInstance.getDefault().getTable(name);
@@ -73,6 +80,7 @@ public class LimeLight {
         tidEntry = table.getEntry("tid");
         tlEntry = table.getEntry("tl");
         clEntry = table.getEntry("cl");
+        rawFiducialsEntry = table.getEntry("rawfiducials");
         ledModeEntry = table.getEntry("ledMode");
     }
 
@@ -379,6 +387,11 @@ public class LimeLight {
 }
 
 public AprilTagScan scan() {
+    AprilTagScan closestScan = scanClosestFiducial(null);
+    if (closestScan != null) {
+      return closestScan;
+    }
+
     boolean target = tvEntry.getDouble(0) == 1;
     double tx = txEntry.getDouble(0);
     double ty = tyEntry.getDouble(0);
@@ -401,6 +414,11 @@ public AprilTagScan scan() {
 }
 
 public AprilTagScan scan(Set<Integer> allowedTagIds) {
+    AprilTagScan closestScan = scanClosestFiducial(allowedTagIds);
+    if (closestScan != null) {
+        return closestScan;
+    }
+
     AprilTagScan scan = scan();
     if (!scan.isValid() || allowedTagIds.contains(scan.tagID)) {
         return scan;
@@ -415,6 +433,62 @@ public AprilTagScan scan(Set<Integer> allowedTagIds) {
         scan.latencyMs,
         new Pose3d()
     );
+}
+
+private AprilTagScan scanClosestFiducial(Set<Integer> allowedTagIds) {
+    double[] raw = rawFiducialsEntry.getDoubleArray(new double[0]);
+    if (raw.length < RAW_FIDUCIAL_STRIDE) {
+        return null;
+    }
+
+    boolean found = false;
+    int bestTagId = -1;
+    double bestTx = 0.0;
+    double bestTy = 0.0;
+    double bestDistanceMeters = 0.0;
+    double bestDistanceScore = Double.POSITIVE_INFINITY;
+
+    for (int i = 0; i + RAW_FIDUCIAL_STRIDE - 1 < raw.length; i += RAW_FIDUCIAL_STRIDE) {
+        int tagId = (int) raw[i + RAW_FIDUCIAL_ID_INDEX];
+        if (allowedTagIds != null && !allowedTagIds.contains(tagId)) {
+            continue;
+        }
+
+        double tx = raw[i + RAW_FIDUCIAL_TX_INDEX];
+        double ty = raw[i + RAW_FIDUCIAL_TY_INDEX];
+        double ta = raw[i + RAW_FIDUCIAL_TA_INDEX];
+        double distanceMeters = raw[i + RAW_FIDUCIAL_DISTANCE_INDEX];
+
+        if (!Double.isFinite(distanceMeters) || distanceMeters <= 0.0) {
+            distanceMeters = calculateDistanceFromArea(ta);
+        }
+        if (!Double.isFinite(distanceMeters) || distanceMeters <= 0.0) {
+            continue;
+        }
+
+        if (!found || distanceMeters < bestDistanceScore) {
+            found = true;
+            bestDistanceScore = distanceMeters;
+            bestTagId = tagId;
+            bestTx = tx;
+            bestTy = ty;
+            bestDistanceMeters = distanceMeters;
+        }
+    }
+
+    if (!found) {
+        return null;
+    }
+
+    Pose3d pose = calculatePoseFromAngles(bestTx, bestTy, bestDistanceMeters);
+    return new AprilTagScan(
+        true,
+        bestTagId,
+        bestTx,
+        bestTy,
+        bestDistanceMeters,
+        getTotalLatencyMs(),
+        pose);
 }
 
 }

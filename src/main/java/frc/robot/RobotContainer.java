@@ -13,6 +13,7 @@ import edu.wpi.first.math.trajectory.TrapezoidProfile.Constraints;
 import edu.wpi.first.math.util.Units;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.Filesystem;
+import edu.wpi.first.wpilibj.GenericHID.RumbleType;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
@@ -20,6 +21,7 @@ import edu.wpi.first.wpilibj2.command.button.Trigger;
 import frc.robot.Constants.OperatorConstants;
 import frc.robot.commands.LimeLightRunner;
 import frc.robot.commands.ShootingCommand;
+import frc.robot.commands.swervedrive.drivebase.AbsoluteDrive;
 import frc.robot.subsystems.HopperSubsystem;
 import frc.robot.subsystems.IntakeSubsystem;
 import frc.robot.subsystems.LimeLight;
@@ -132,10 +134,17 @@ private final Superstructure m_superstructure = new Superstructure(
 
   public void configureSubSystemKeys()
   {
-    shooterXbox.a().whileTrue(m_superstructure.hopperFeedCommand());
+    shooterXbox.a().whileTrue(m_superstructure.feedAllCommand());
     shooterXbox.y().whileTrue(m_turret.trackTarget(m_limelight, drivebase));
     driverXbox.y().whileTrue(m_limelight.alignCommand(drivebase));
-    shooterXbox.povDown().whileTrue(m_superstructure.kickerFeedCommand());
+    shooterXbox.povLeft().onTrue(m_shooter.decreaseLimelightPowerForLastShotCommand());
+    shooterXbox.povRight().onTrue(m_shooter.increaseLimelightPowerForLastShotCommand());
+    shooterXbox.povDown().onTrue(m_shooter.confirmMadeShotCommand());
+    new Trigger(m_shooter::isFeedbackWindowOpen)
+        .whileTrue(Commands.startEnd(
+            () -> shooterXbox.getHID().setRumble(RumbleType.kBothRumble, 1.0),
+            () -> shooterXbox.getHID().setRumble(RumbleType.kBothRumble, 0.0))
+            .ignoringDisable(true));
     
     m_turret.setDefaultCommand(
     m_superstructure.manualTurretControl(() -> {
@@ -156,10 +165,9 @@ m_intake.setDefaultCommand(
     //shooterXbox.leftTrigger(0.1).whileTrue(m_climber.climbUpCommand());
 
 //got rid of pov buttons because they like to break too often, might fix later for more precise aiming if we dont get limelight in ti
-    new Trigger(() -> shooterXbox.getRightTriggerAxis() > 0.10)
-    .whileTrue(m_shooter.setPercentAsRPM(
-        () -> shooterXbox.getRightTriggerAxis()
-    ));
+    Trigger shooterSpinupTrigger = new Trigger(() -> shooterXbox.getRightTriggerAxis() > 0.10);
+    shooterSpinupTrigger.whileTrue(m_shooter.spinUp());
+    shooterSpinupTrigger.onFalse(m_shooter.stop());
 shooterXbox.b().whileTrue(m_intake.intakeCommand());
 
     }
@@ -179,10 +187,19 @@ shooterXbox.b().whileTrue(m_intake.intakeCommand());
    */
   private void configureBindings()
   {
+    new Trigger(DriverStation::isEnabled)
+        .onTrue(drivebase.centerModulesCommand().withTimeout(0.25));
+
     Command driveRobotRelativeAngularVelocity = Commands.run(
         () -> drivebase.drive(getScaledRobotRelativeDrive()),
         drivebase);
-    drivebase.setDefaultCommand(driveRobotRelativeAngularVelocity);
+    Command absoluteDriveCommand = new AbsoluteDrive(
+        drivebase,
+        () -> driverXbox.getLeftY(),
+        () -> driverXbox.getLeftX(),
+        () -> Math.abs(driverXbox.getRightX()) > OperatorConstants.DEADBAND ? driverXbox.getRightX() : 0.0,
+        () -> Math.abs(driverXbox.getRightY()) > OperatorConstants.DEADBAND ? -driverXbox.getRightY() : 0.0);
+    drivebase.setDefaultCommand(absoluteDriveCommand);
 
     if (Robot.isSimulation())
     {
@@ -213,7 +230,7 @@ shooterXbox.b().whileTrue(m_intake.intakeCommand());
     }
     if (DriverStation.isTest())
     {
-      drivebase.setDefaultCommand(driveRobotRelativeAngularVelocity); // Keep driver controls robot-relative in test too.
+      drivebase.setDefaultCommand(absoluteDriveCommand);
 
       driverXbox.x().whileTrue(Commands.runOnce(drivebase::lock, drivebase).repeatedly());
       driverXbox.y().whileTrue(drivebase.driveToDistanceCommand(1.0, 0.2));
@@ -224,11 +241,12 @@ shooterXbox.b().whileTrue(m_intake.intakeCommand());
     } else
     {
       driverXbox.a().onTrue((Commands.runOnce(drivebase::zeroGyro)));
-      driverXbox.rightStick().whileTrue(driveRobotRelativeAngularVelocity);
       driverXbox.povUp().onTrue(Commands.runOnce(this::increaseDriveSpeedPreset));
       driverXbox.povDown().onTrue(Commands.runOnce(this::decreaseDriveSpeedPreset));
       driverXbox.x().onTrue(Commands.runOnce(drivebase::addFakeVisionReading));
-      driverXbox.back().whileTrue(Commands.none());
+      driverXbox.back().onTrue(
+          Commands.runOnce(drivebase::printAbsoluteEncoderCalibration).ignoringDisable(true));
+      driverXbox.back().whileTrue(drivebase.centerModulesCommand());
       driverXbox.leftBumper().whileTrue(Commands.runOnce(drivebase::lock, drivebase).repeatedly());
       
     }

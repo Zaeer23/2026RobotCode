@@ -7,6 +7,7 @@ package frc.robot.subsystems.swervedrive;
 import static edu.wpi.first.units.Units.Meter;
 
 import edu.wpi.first.math.geometry.Translation2d;
+import com.ctre.phoenix6.hardware.CANcoder;
 import com.pathplanner.lib.auto.AutoBuilder;
 import com.pathplanner.lib.commands.PathPlannerAuto;
 import com.pathplanner.lib.commands.PathfindingCommand;
@@ -55,6 +56,29 @@ import swervelib.telemetry.SwerveDriveTelemetry.TelemetryVerbosity;
 
 public class SwerveSubsystem extends SubsystemBase
 {
+  private static final class ModuleCalibrationTarget {
+    final String name;
+    final int canCoderId;
+    final String canBus;
+    final String jsonPath;
+    final CANcoder cancoder;
+
+    ModuleCalibrationTarget(String name, int canCoderId, String canBus, String jsonPath) {
+      this.name = name;
+      this.canCoderId = canCoderId;
+      this.canBus = canBus;
+      this.jsonPath = jsonPath;
+      this.cancoder = new CANcoder(canCoderId, canBus);
+    }
+  }
+
+  private final ModuleCalibrationTarget[] calibrationTargets = new ModuleCalibrationTarget[] {
+      new ModuleCalibrationTarget("frontleft", 40, "rio", "swerve/neo/modules/frontleft.json"),
+      new ModuleCalibrationTarget("frontright", 20, "rio", "swerve/neo/modules/frontright.json"),
+      new ModuleCalibrationTarget("backleft", 10, "rio", "swerve/neo/modules/backleft.json"),
+      new ModuleCalibrationTarget("backright", 30, "rio", "swerve/neo/modules/backright.json")
+  };
+
   private boolean autoBuilderConfigured = false;
   
   /**
@@ -100,9 +124,9 @@ public class SwerveSubsystem extends SubsystemBase
     swerveDrive.setAngularVelocityCompensation(true,
                                                true,
                                                0.1); //Correct for skew that gets worse as angular velocity increases. Start with a coefficient of 0.1.
-    swerveDrive.setModuleEncoderAutoSynchronize(false,
-                                                1); // Enable if you want to resynchronize your absolute encoders and motor encoders periodically when they are not moving.
-    // swerveDrive.pushOffsetsToEncoders(); // Set the absolute encoder to be used over the internal encoder and push the offsets onto it. Throws warning if not possible
+    swerveDrive.setModuleEncoderAutoSynchronize(true,
+                                                1); // Keep internal angle encoders synced with CANcoder references.
+    swerveDrive.pushOffsetsToEncoders(); // Apply absolute encoder references to angle motor encoders at startup.
     if (visionDriveTest)
     {
       setupPhotonVision();
@@ -625,6 +649,34 @@ public class SwerveSubsystem extends SubsystemBase
   public void setMotorBrake(boolean brake)
   {
     swerveDrive.setMotorIdleMode(brake);
+  }
+
+  public void printAbsoluteEncoderCalibration() {
+    System.out.println("SWERVE_CAL_NOTE,Disable robot and align wheels straight by hand before capturing offsets.");
+    System.out.println("SWERVE_OFFSET_HEADER,module,cancoder_id,raw_abs_deg,absoluteEncoderOffset_to_use_deg,json_path");
+    for (ModuleCalibrationTarget target : calibrationTargets) {
+      double rawRotations = target.cancoder.getAbsolutePosition().refresh().getValueAsDouble();
+      double rawDegrees = rawRotations * 360.0;
+      double wrappedRawDegrees = wrapToSignedDegrees(rawDegrees);
+      String row = String.format(
+          "SWERVE_OFFSET_ROW,%s,%d,%.3f,%.3f,%s",
+          target.name,
+          target.canCoderId,
+          wrappedRawDegrees,
+          wrappedRawDegrees,
+          target.jsonPath);
+      System.out.println(row);
+    }
+  }
+
+  private double wrapToSignedDegrees(double angleDegrees) {
+    double wrapped = angleDegrees % 360.0;
+    if (wrapped > 180.0) {
+      wrapped -= 360.0;
+    } else if (wrapped <= -180.0) {
+      wrapped += 360.0;
+    }
+    return wrapped;
   }
 
   /**

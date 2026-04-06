@@ -91,7 +91,7 @@ public class TurretSubsystem extends SubsystemBase {
   private static final double TRACK_MAX_TX_JUMP_DEGREES = 10.0;
   private static final double TRACK_MAX_DISTANCE_JUMP_INCHES = 36.0;
   private static final int TRACK_JUMP_HOLD_CYCLES = 5;
-  private static final int TRACK_MIN_ACQUIRE_SAMPLES = 3;
+  private static final int TRACK_MIN_ACQUIRE_SAMPLES = 1;
   private static final double TRACK_LATENCY_FUDGE_MS = 20.0;
 
   private double filteredTrackingTxDegrees = 0.0;
