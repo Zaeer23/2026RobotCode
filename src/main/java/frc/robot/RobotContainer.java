@@ -14,6 +14,7 @@ import edu.wpi.first.math.util.Units;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.Filesystem;
 import edu.wpi.first.wpilibj.GenericHID.RumbleType;
+import edu.wpi.first.wpilibj.RobotBase;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
@@ -21,7 +22,6 @@ import edu.wpi.first.wpilibj2.command.button.Trigger;
 import frc.robot.Constants.OperatorConstants;
 import frc.robot.commands.LimeLightRunner;
 import frc.robot.commands.ShootingCommand;
-import frc.robot.commands.swervedrive.drivebase.AbsoluteDrive;
 import frc.robot.subsystems.HopperSubsystem;
 import frc.robot.subsystems.IntakeSubsystem;
 import frc.robot.subsystems.LimeLight;
@@ -150,10 +150,12 @@ private final ShuffleboardManager m_shuffleboard = new ShuffleboardManager(
             () -> shooterXbox.getHID().setRumble(RumbleType.kBothRumble, 0.0))
             .ignoringDisable(true));
     
-    m_turret.setDefaultCommand(m_turret.trackTarget(m_limelight, drivebase));
-    new Trigger(() -> Math.abs(shooterXbox.getRightX()) > 0.12)
-        .whileTrue(m_superstructure.manualTurretControl(() -> {
+    m_turret.setDefaultCommand(
+        m_superstructure.manualTurretControl(() -> {
           double input = shooterXbox.getRightX();
+          if (Math.abs(input) < 0.12) {
+            return 0.0;
+          }
           return Math.copySign(input * input, input);
         }));
 
@@ -195,13 +197,14 @@ shooterXbox.b().whileTrue(m_superstructure.intakeCommand());
     Command driveRobotRelativeAngularVelocity = Commands.run(
         () -> drivebase.drive(getScaledRobotRelativeDrive()),
         drivebase);
-    Command absoluteDriveCommand = new AbsoluteDrive(
-        drivebase,
-        () -> driverXbox.getLeftY(),
-        () -> driverXbox.getLeftX(),
-        () -> Math.abs(driverXbox.getRightX()) > OperatorConstants.DEADBAND ? driverXbox.getRightX() : 0.0,
-        () -> Math.abs(driverXbox.getRightY()) > OperatorConstants.DEADBAND ? -driverXbox.getRightY() : 0.0);
-    drivebase.setDefaultCommand(absoluteDriveCommand);
+    Command driveFieldOrientedDirectAngleKeyboard = drivebase.driveFieldOriented(driveDirectAngleKeyboard);
+    if (RobotBase.isSimulation())
+    {
+      drivebase.setDefaultCommand(driveFieldOrientedDirectAngleKeyboard);
+    } else
+    {
+      drivebase.setDefaultCommand(driveRobotRelativeAngularVelocity);
+    }
 
     if (Robot.isSimulation())
     {
@@ -232,7 +235,7 @@ shooterXbox.b().whileTrue(m_superstructure.intakeCommand());
     }
     if (DriverStation.isTest())
     {
-      drivebase.setDefaultCommand(absoluteDriveCommand);
+      drivebase.setDefaultCommand(driveRobotRelativeAngularVelocity);
 
       driverXbox.x().whileTrue(Commands.runOnce(drivebase::lock, drivebase).repeatedly());
       driverXbox.y().whileTrue(drivebase.driveToDistanceCommand(1.0, 0.2));
@@ -243,6 +246,7 @@ shooterXbox.b().whileTrue(m_superstructure.intakeCommand());
     } else
     {
       driverXbox.a().onTrue((Commands.runOnce(drivebase::zeroGyro)));
+      driverXbox.rightStick().whileTrue(driveRobotRelativeAngularVelocity);
       driverXbox.povUp().onTrue(Commands.runOnce(this::increaseDriveSpeedPreset));
       driverXbox.povDown().onTrue(Commands.runOnce(this::decreaseDriveSpeedPreset));
       driverXbox.x().onTrue(Commands.runOnce(drivebase::addFakeVisionReading));

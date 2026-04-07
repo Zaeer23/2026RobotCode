@@ -43,13 +43,16 @@ public class IntakeSubsystem extends SubsystemBase {
 
   private static final double INTAKE_SPEED = 1.0;
   private static final double PIVOT_STOW_DEGREES = 90.0;
-  private static final double PIVOT_DEPLOY_DEGREES = 90.0;
+  private static final double PIVOT_DEPLOY_DEGREES = 0.0;
   private static final double PIVOT_MIN_DEGREES = 0.0;
   private static final double PIVOT_MAX_DEGREES = 90.0;
   private static final double PIVOT_JOYSTICK_THRESHOLD = 0.25;
   private static final double PIVOT_BOUNCE_HIGH_DEGREES = 23.0;
   private static final double PIVOT_BOUNCE_LOW_DEGREES = 0.0;
   private static final double PIVOT_BOUNCE_PERIOD_SECONDS = 0.18;
+  private static final double PIVOT_INTAKE_OSCILLATE_HIGH_DEGREES = 27.0;
+  private static final double PIVOT_INTAKE_OSCILLATE_LOW_DEGREES = 0.0;
+  private static final double PIVOT_INTAKE_OSCILLATE_PERIOD_SECONDS = 0.20;
 
   // 1. Changed roller motor to SparkMax with Brushless (NEO) type
   private final SparkMax rollerMotor = new SparkMax(Constants.IntakeConstants.kRollerMotorId, MotorType.kBrushless);
@@ -136,7 +139,10 @@ public class IntakeSubsystem extends SubsystemBase {
 
   public Command deployAndRollCommand() {
     return Commands.run(() -> {
-      setIntakeDeployed();
+      double phaseSeconds = Timer.getFPGATimestamp() % PIVOT_INTAKE_OSCILLATE_PERIOD_SECONDS;
+      boolean highPhase = phaseSeconds < (PIVOT_INTAKE_OSCILLATE_PERIOD_SECONDS / 2.0);
+      double targetDegrees = highPhase ? PIVOT_INTAKE_OSCILLATE_HIGH_DEGREES : PIVOT_INTAKE_OSCILLATE_LOW_DEGREES;
+      intakePivotController.setPosition(Degrees.of(targetDegrees));
       smc.setDutyCycle(INTAKE_SPEED);
     }, this).finallyDo(() -> {
       smc.setDutyCycle(0);
