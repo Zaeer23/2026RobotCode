@@ -3,6 +3,8 @@
 // the WPILib BSD license file in the root directory of this project.
 
 package frc.robot;
+import edu.wpi.first.cameraserver.CameraServer;
+import edu.wpi.first.cscore.UsbCamera;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.controller.ProfiledPIDController;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -114,6 +116,7 @@ private final KickerSubsystem m_kicker   = new KickerSubsystem();
 private final IntakeSubsystem m_intake   = new IntakeSubsystem();
 private final HopperSubsystem m_hopper   = new HopperSubsystem();
 private final ClimberSubsystem m_climber = new ClimberSubsystem();
+private final UsbCamera m_driverCamera = startDriverCamera();
 
 
 // Create the Superstructure instance
@@ -121,7 +124,7 @@ private final Superstructure m_superstructure = new Superstructure(
     m_shooter, m_turret, m_hood, m_intake, m_hopper, m_kicker, m_limelight
 );
 private final ShuffleboardManager m_shuffleboard = new ShuffleboardManager(
-    m_limelight, m_superstructure, drivebase, m_turret
+    m_limelight, m_superstructure, drivebase, m_turret, m_driverCamera
 );
 
   public RobotContainer()
@@ -309,6 +312,14 @@ m_intake.setDefaultCommand(
   public void updateShuffleboard()
   {
     m_shuffleboard.update();
+  }
+
+  private UsbCamera startDriverCamera()
+  {
+    UsbCamera camera = CameraServer.startAutomaticCapture("DriverCam", 0);
+    camera.setResolution(320, 240);
+    camera.setFPS(20);
+    return camera;
   }
 
   private ChassisSpeeds getScaledRobotRelativeDrive()

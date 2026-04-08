@@ -5,6 +5,7 @@ import static edu.wpi.first.units.Units.RPM;
 
 import java.util.Map;
 
+import edu.wpi.first.cscore.VideoSource;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
@@ -73,6 +74,7 @@ public class ShuffleboardManager {
     private final Superstructure superstructure;
     private final SwerveSubsystem drivebase;
     private final TurretSubsystem turret;
+    private final VideoSource driverCamera;
     private final Field2d field = new Field2d();
     private final SendableChooser<ShooterControlProfile> controlProfileChooser = new SendableChooser<>();
     private final SendableChooser<Double> driveSpeedChooser = new SendableChooser<>();
@@ -141,12 +143,14 @@ public class ShuffleboardManager {
             LimeLight limelight,
             Superstructure superstructure,
             SwerveSubsystem drivebase,
-            TurretSubsystem turret) {
+            TurretSubsystem turret,
+            VideoSource driverCamera) {
 
         this.limelight = limelight;
         this.superstructure = superstructure;
         this.drivebase = drivebase;
         this.turret = turret;
+        this.driverCamera = driverCamera;
 
         SmartDashboard.putString("Dashboard/Build", DASHBOARD_BUILD);
         System.out.println("[SHUFFLEBOARD] Initializing " + DASHBOARD_BUILD);
@@ -286,12 +290,18 @@ public class ShuffleboardManager {
         matchTab.add("2026 Field", field)
                 .withWidget(BuiltInWidgets.kField)
                 .withPosition(0, 0)
-                .withSize(8, 5);
+                .withSize(7, 5);
+
+        matchTab.add("Driver Camera", this.driverCamera)
+                .withWidget(BuiltInWidgets.kCameraStream)
+                .withPosition(7, 0)
+                .withSize(5, 3)
+                .withProperties(Map.of("Show crosshair", false, "Show controls", false, "Rotation", "NONE"));
 
         ShuffleboardLayout matchVision = matchTab
                 .getLayout("Driver Overlay", BuiltInLayouts.kGrid)
-                .withPosition(8, 0)
-                .withSize(4, 5)
+                .withPosition(7, 3)
+                .withSize(5, 2)
                 .withProperties(Map.of("Number of columns", 2, "Number of rows", 6));
 
         entryMatchHasTarget = matchVision.add("Target Lock", false).withWidget(BuiltInWidgets.kBooleanBox);
