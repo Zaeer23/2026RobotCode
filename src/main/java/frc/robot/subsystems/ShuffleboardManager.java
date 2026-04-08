@@ -6,8 +6,10 @@ import static edu.wpi.first.units.Units.RPM;
 import java.util.Map;
 
 import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
 import edu.wpi.first.wpilibj.shuffleboard.Shuffleboard;
@@ -21,6 +23,45 @@ import frc.robot.subsystems.swervedrive.SwerveSubsystem;
 
 public class ShuffleboardManager {
 
+    public enum ShooterControlProfile {
+        CURRENT("Current Controls"),
+        ALT_TWO("Trigger Feed Layout");
+
+        private final String label;
+
+        ShooterControlProfile(String label) {
+            this.label = label;
+        }
+
+        @Override
+        public String toString() {
+            return label;
+        }
+    }
+
+    public enum StartPosition {
+        AMP_SIDE("Amp Side", new Pose2d(1.60, 6.70, Rotation2d.fromDegrees(0.0))),
+        CENTER("Center", new Pose2d(1.45, 4.10, Rotation2d.fromDegrees(0.0))),
+        SOURCE_SIDE("Source Side", new Pose2d(1.60, 1.50, Rotation2d.fromDegrees(0.0)));
+
+        private final String label;
+        private final Pose2d pose;
+
+        StartPosition(String label, Pose2d pose) {
+            this.label = label;
+            this.pose = pose;
+        }
+
+        public Pose2d getPose() {
+            return pose;
+        }
+
+        @Override
+        public String toString() {
+            return label;
+        }
+    }
+
     private static final String PREMATCH_TAB = "2026 Pre-Match";
     private static final String SHOOTING_TAB = "2026 Shooting";
     private static final String DRIVE_TAB = "2026 Drive";
@@ -32,6 +73,9 @@ public class ShuffleboardManager {
     private final SwerveSubsystem drivebase;
     private final TurretSubsystem turret;
     private final Field2d field = new Field2d();
+    private final SendableChooser<ShooterControlProfile> controlProfileChooser = new SendableChooser<>();
+    private final SendableChooser<Double> driveSpeedChooser = new SendableChooser<>();
+    private final SendableChooser<StartPosition> startPositionChooser = new SendableChooser<>();
 
     private final SimpleWidget entryAlliance;
     private final SimpleWidget entryDriverStation;
@@ -88,6 +132,9 @@ public class ShuffleboardManager {
     private final SimpleWidget entryMatchStream;
     private final SimpleWidget entryMatchSpeed;
     private final SimpleWidget entryMatchTurretHealth;
+    private final SimpleWidget entryActiveControlSet;
+    private final SimpleWidget entrySelectedDriveScale;
+    private final SimpleWidget entrySelectedStartPose;
 
     public ShuffleboardManager(
             LimeLight limelight,
@@ -140,6 +187,20 @@ public class ShuffleboardManager {
         entryHoodAngleDeg = preMatch.add("Hood Angle (deg)", 0.0)
                 .withPosition(4, 3)
                 .withSize(2, 1);
+
+        configureChoosers();
+        preMatch.add("Shooter Controls", controlProfileChooser)
+                .withWidget(BuiltInWidgets.kComboBoxChooser)
+                .withPosition(6, 0)
+                .withSize(3, 1);
+        preMatch.add("Drive Speed", driveSpeedChooser)
+                .withWidget(BuiltInWidgets.kComboBoxChooser)
+                .withPosition(6, 1)
+                .withSize(3, 1);
+        preMatch.add("Start Position", startPositionChooser)
+                .withWidget(BuiltInWidgets.kComboBoxChooser)
+                .withPosition(6, 2)
+                .withSize(3, 1);
 
         ShuffleboardTab shootingTab = Shuffleboard.getTab(SHOOTING_TAB);
         shootingTab.add("Vision Status", "Live Limelight diagnostics")
@@ -251,6 +312,9 @@ public class ShuffleboardManager {
                 .withWidget(BuiltInWidgets.kNumberBar)
                 .withProperties(Map.of("Min", 0.0, "Max", 5.0));
         entryFieldZone = matchVision.add("Field Zone", "Center");
+        entryActiveControlSet = matchVision.add("Controls", ShooterControlProfile.CURRENT.toString());
+        entrySelectedDriveScale = matchVision.add("Drive Scale", 0.65);
+        entrySelectedStartPose = matchVision.add("Start Pose", StartPosition.CENTER.toString());
 
         initializeFieldDecor();
         Shuffleboard.selectTab(MATCH_TAB);
@@ -343,6 +407,9 @@ public class ShuffleboardManager {
         entryMatchShooter.getEntry().setDouble(round1(shooterRPM));
         entryMatchSpeed.getEntry().setDouble(round2(Math.hypot(speeds.vxMetersPerSecond, speeds.vyMetersPerSecond)));
         entryFieldZone.getEntry().setString(describeFieldZone(pose));
+        entryActiveControlSet.getEntry().setString(getSelectedControlProfile().toString());
+        entrySelectedDriveScale.getEntry().setDouble(getSelectedDriveSpeedScale());
+        entrySelectedStartPose.getEntry().setString(getSelectedStartPosition().toString());
         SmartDashboard.putString("Dashboard/ActiveTab", MATCH_TAB);
     }
 
@@ -355,6 +422,7 @@ public class ShuffleboardManager {
         if (!scan.hasTarget || scan.distance <= 0.0) {
             field.getObject("Limelight Target").setPoses();
             field.getObject("Aim Line").setPoses();
+            field.getObject("Selected Start").setPose(getSelectedStartPosition().getPose());
             return;
         }
 
@@ -364,12 +432,46 @@ public class ShuffleboardManager {
         Pose2d targetPose = new Pose2d(targetX, targetY, robotPose.getRotation());
         field.getObject("Limelight Target").setPose(targetPose);
         field.getObject("Aim Line").setPoses(robotPose, targetPose);
+        field.getObject("Selected Start").setPose(getSelectedStartPosition().getPose());
     }
 
     private void initializeFieldDecor() {
         field.getObject("Home Marker").setPose(new Pose2d(1.5, 4.1, new edu.wpi.first.math.geometry.Rotation2d()));
         field.getObject("Mid Marker").setPose(new Pose2d(8.3, 4.1, new edu.wpi.first.math.geometry.Rotation2d()));
         field.getObject("Opponent Marker").setPose(new Pose2d(15.1, 4.1, new edu.wpi.first.math.geometry.Rotation2d()));
+        field.getObject("Selected Start").setPose(getSelectedStartPosition().getPose());
+    }
+
+    private void configureChoosers() {
+        controlProfileChooser.setDefaultOption(
+                ShooterControlProfile.CURRENT.toString(),
+                ShooterControlProfile.CURRENT);
+        controlProfileChooser.addOption(
+                ShooterControlProfile.ALT_TWO.toString(),
+                ShooterControlProfile.ALT_TWO);
+
+        driveSpeedChooser.setDefaultOption("65%", 0.65);
+        driveSpeedChooser.addOption("35%", 0.35);
+        driveSpeedChooser.addOption("100%", 1.00);
+
+        startPositionChooser.setDefaultOption(StartPosition.CENTER.toString(), StartPosition.CENTER);
+        startPositionChooser.addOption(StartPosition.AMP_SIDE.toString(), StartPosition.AMP_SIDE);
+        startPositionChooser.addOption(StartPosition.SOURCE_SIDE.toString(), StartPosition.SOURCE_SIDE);
+    }
+
+    public ShooterControlProfile getSelectedControlProfile() {
+        ShooterControlProfile selected = controlProfileChooser.getSelected();
+        return selected != null ? selected : ShooterControlProfile.CURRENT;
+    }
+
+    public double getSelectedDriveSpeedScale() {
+        Double selected = driveSpeedChooser.getSelected();
+        return selected != null ? selected.doubleValue() : 0.65;
+    }
+
+    public StartPosition getSelectedStartPosition() {
+        StartPosition selected = startPositionChooser.getSelected();
+        return selected != null ? selected : StartPosition.CENTER;
     }
 
     private String describeFieldZone(Pose2d pose) {

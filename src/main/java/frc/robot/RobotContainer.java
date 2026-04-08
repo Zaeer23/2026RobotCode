@@ -33,6 +33,7 @@ import frc.robot.subsystems.ClimberSubsystem;
 import frc.robot.subsystems.HoodSubsystem;
 import frc.robot.subsystems.ShooterSubsystem;
 import frc.robot.subsystems.ShuffleboardManager;
+import frc.robot.subsystems.ShuffleboardManager.ShooterControlProfile;
 import frc.robot.subsystems.TurretSubsystem;
 import frc.robot.subsystems.KickerSubsystem;
 
@@ -46,13 +47,12 @@ import static edu.wpi.first.units.Units.Degrees;
  */
 public class RobotContainer
 {
-  private static final double[] DRIVE_SPEED_PRESETS = {0.35, 0.65, 1.0};
   private static final Set<Integer> HUB_TAG_IDS = Set.of(9, 10, 11, 18, 19, 20);
+  private static final double ALT_TURRET_MANUAL_SPEED = 0.18;
 
   // Replace with CommandPS4Controller or CommandJoystick if needed
   final         CommandXboxController driverXbox = new CommandXboxController(0);
   final         CommandXboxController shooterXbox = new CommandXboxController(1);
-  private int currentDriveSpeedIndex = 1;
   // The robot's subsystems and commands are defined here...
   private final SwerveSubsystem       drivebase  = new SwerveSubsystem(new File(Filesystem.getDeployDirectory(),
                                                                                 "swerve/neo"));
@@ -138,12 +138,17 @@ private final ShuffleboardManager m_shuffleboard = new ShuffleboardManager(
 
   public void configureSubSystemKeys()
   {
-    shooterXbox.a().whileTrue(m_superstructure.feedAllCommand());
-    shooterXbox.y().whileTrue(Commands.none());
+    new Trigger(() -> isCurrentShooterProfile() && shooterXbox.a().getAsBoolean())
+        .whileTrue(m_superstructure.feedAllCommand());
+    new Trigger(() -> isCurrentShooterProfile() && shooterXbox.y().getAsBoolean())
+        .whileTrue(Commands.none());
     driverXbox.y().whileTrue(m_limelight.alignCommand(drivebase));
-    shooterXbox.povLeft().onTrue(m_shooter.decreaseLimelightPowerForLastShotCommand());
-    shooterXbox.povRight().onTrue(m_shooter.increaseLimelightPowerForLastShotCommand());
-    shooterXbox.povDown().onTrue(m_shooter.confirmMadeShotCommand());
+    new Trigger(() -> isCurrentShooterProfile() && shooterXbox.povLeft().getAsBoolean())
+        .onTrue(m_shooter.decreaseLimelightPowerForLastShotCommand());
+    new Trigger(() -> isCurrentShooterProfile() && shooterXbox.povRight().getAsBoolean())
+        .onTrue(m_shooter.increaseLimelightPowerForLastShotCommand());
+    new Trigger(() -> isCurrentShooterProfile() && shooterXbox.povDown().getAsBoolean())
+        .onTrue(m_shooter.confirmMadeShotCommand());
     new Trigger(m_shooter::isFeedbackWindowOpen)
         .whileTrue(Commands.startEnd(
             () -> shooterXbox.getHID().setRumble(RumbleType.kBothRumble, 1.0),
@@ -152,27 +157,48 @@ private final ShuffleboardManager m_shuffleboard = new ShuffleboardManager(
     
     m_turret.setDefaultCommand(
         m_superstructure.manualTurretControl(() -> {
-          double input = shooterXbox.getRightX();
-          if (Math.abs(input) < 0.12) {
-            return 0.0;
+          if (isAltShooterProfile()) {
+            boolean left = shooterXbox.leftBumper().getAsBoolean();
+            boolean right = shooterXbox.rightBumper().getAsBoolean();
+            if (left == right) {
+              return 0.0;
+            }
+            return left ? -ALT_TURRET_MANUAL_SPEED : ALT_TURRET_MANUAL_SPEED;
           }
-          return Math.copySign(input * input, input);
+          return shooterXbox.getRightX() * 0.35;
         }));
 
 m_intake.setDefaultCommand(
-    m_intake.joystickPivotTwoPosition(() -> -shooterXbox.getLeftY())
+    m_intake.manualPivot(() -> shooterXbox.getLeftY())
 );
-    shooterXbox.x().whileTrue(m_hopper.backFeedCommand());
+    new Trigger(() -> isCurrentShooterProfile() && shooterXbox.x().getAsBoolean())
+        .whileTrue(m_hopper.backFeedCommand());
 
-    shooterXbox.rightBumper().whileTrue(m_superstructure.limelightShootCommand(drivebase));
+    new Trigger(() -> isCurrentShooterProfile() && shooterXbox.rightBumper().getAsBoolean())
+        .whileTrue(
+        m_shooter.setSpeedFromLimelight(m_limelight, 45.0, HUB_TAG_IDS));
     //shooterXbox.leftBumper().whileTrue(m_climber.climbDownCommand());
     //shooterXbox.leftTrigger(0.1).whileTrue(m_climber.climbUpCommand());
 
 //got rid of pov buttons because they like to break too often, might fix later for more precise aiming if we dont get limelight in ti
-    Trigger shooterSpinupTrigger = new Trigger(() -> shooterXbox.getRightTriggerAxis() > 0.10);
+    Trigger shooterSpinupTrigger = new Trigger(() -> isCurrentShooterProfile() && shooterXbox.getRightTriggerAxis() > 0.10);
     shooterSpinupTrigger.whileTrue(m_shooter.spinUp());
     shooterSpinupTrigger.onFalse(m_shooter.stop());
-shooterXbox.b().whileTrue(m_superstructure.intakeCommand());
+    new Trigger(() -> isCurrentShooterProfile() && shooterXbox.b().getAsBoolean())
+        .whileTrue(m_superstructure.intakeCommand());
+
+    new Trigger(() -> isAltShooterProfile() && shooterXbox.getRightTriggerAxis() > 0.10)
+        .whileTrue(m_shooter.spinUp());
+    new Trigger(() -> isAltShooterProfile() && shooterXbox.getLeftTriggerAxis() > 0.10)
+        .whileTrue(Commands.parallel(
+            m_hopper.feedCommand().asProxy(),
+            m_kicker.feedCommand().asProxy()));
+    new Trigger(() -> isAltShooterProfile() && shooterXbox.a().getAsBoolean())
+        .whileTrue(m_superstructure.intakeCommand());
+    new Trigger(() -> isAltShooterProfile() && shooterXbox.y().getAsBoolean())
+        .whileTrue(m_hopper.backFeedCommand());
+    new Trigger(() -> isAltShooterProfile() && shooterXbox.b().getAsBoolean())
+        .whileTrue(m_intake.backFeedAndRollCommand());
 
     }
   
@@ -247,8 +273,6 @@ shooterXbox.b().whileTrue(m_superstructure.intakeCommand());
     {
       driverXbox.a().onTrue((Commands.runOnce(drivebase::zeroGyro)));
       driverXbox.rightStick().whileTrue(driveRobotRelativeAngularVelocity);
-      driverXbox.povUp().onTrue(Commands.runOnce(this::increaseDriveSpeedPreset));
-      driverXbox.povDown().onTrue(Commands.runOnce(this::decreaseDriveSpeedPreset));
       driverXbox.x().onTrue(Commands.runOnce(drivebase::addFakeVisionReading));
       driverXbox.back().onTrue(
           Commands.runOnce(drivebase::printAbsoluteEncoderCalibration).ignoringDisable(true));
@@ -294,7 +318,7 @@ shooterXbox.b().whileTrue(m_superstructure.intakeCommand());
 
   private ChassisSpeeds getScaledRobotRelativeDrive()
   {
-    double driveScale = DRIVE_SPEED_PRESETS[currentDriveSpeedIndex];
+    double driveScale = m_shuffleboard.getSelectedDriveSpeedScale();
     double maxLinearSpeed = drivebase.getSwerveDrive().getMaximumChassisVelocity();
     double maxAngularSpeed = drivebase.getSwerveDrive().getMaximumChassisAngularVelocity();
 
@@ -308,13 +332,18 @@ shooterXbox.b().whileTrue(m_superstructure.intakeCommand());
         rotateCounterClockwise);
   }
 
-  private void increaseDriveSpeedPreset()
+  public void applySelectedStartPose()
   {
-    currentDriveSpeedIndex = Math.min(currentDriveSpeedIndex + 1, DRIVE_SPEED_PRESETS.length - 1);
+    drivebase.resetOdometry(m_shuffleboard.getSelectedStartPosition().getPose());
   }
 
-  private void decreaseDriveSpeedPreset()
+  private boolean isCurrentShooterProfile()
   {
-    currentDriveSpeedIndex = Math.max(currentDriveSpeedIndex - 1, 0);
+    return m_shuffleboard.getSelectedControlProfile() == ShooterControlProfile.CURRENT;
+  }
+
+  private boolean isAltShooterProfile()
+  {
+    return m_shuffleboard.getSelectedControlProfile() == ShooterControlProfile.ALT_TWO;
   }
 }

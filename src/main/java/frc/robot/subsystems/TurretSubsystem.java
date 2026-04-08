@@ -1,6 +1,5 @@
 package frc.robot.subsystems;
 
-import java.util.Set;
 import java.util.function.Supplier;
 
 import org.littletonrobotics.junction.Logger;
@@ -8,7 +7,6 @@ import org.littletonrobotics.junction.Logger;
 import com.revrobotics.spark.SparkLowLevel.MotorType;
 import com.revrobotics.spark.SparkMax;
 
-import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.controller.SimpleMotorFeedforward;
 import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.math.geometry.Rotation3d;
@@ -23,12 +21,12 @@ import static edu.wpi.first.units.Units.Second;
 import static edu.wpi.first.units.Units.Seconds;
 import static edu.wpi.first.units.Units.Volts;
 import edu.wpi.first.units.measure.Angle;
+import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.Constants;
-import frc.robot.subsystems.swervedrive.SwerveSubsystem;
 import yams.gearing.GearBox;
 import yams.gearing.MechanismGearing;
 import yams.mechanisms.config.MechanismPositionConfig;
@@ -44,17 +42,8 @@ import yams.motorcontrollers.local.SparkWrapper;
 
 public class TurretSubsystem extends SubsystemBase {
 
-  private static final Set<Integer> TRACKING_TAG_IDS =
-      Set.of(9, 10, 11, 18, 19, 20, 2, 3, 4, 5, 8, 21, 24, 25, 26, 27);
-
   private static final double MAX_ONE_DIR_FOV = 90.0;
   private static final double SLOW_ZONE_DEGREES = 20.0;
-  private static final double TRACK_TX_FILTER_ALPHA = 0.35;
-  private static final double TRACK_DEADBAND_DEGREES = 0.75;
-  private static final double TRACK_KP = 0.012;
-  private static final double TRACK_MIN_OUTPUT = 0.045;
-  private static final double TRACK_MAX_OUTPUT = 0.18;
-  private static final double TRACK_OUTPUT_SIGN = 1.0;
   private static final double TRACK_HEALTH_MAX_TX_DEGREES = 3.0;
   private static final double TRACK_HEALTH_MAX_AGE_SECONDS = 0.20;
 
@@ -87,12 +76,11 @@ public class TurretSubsystem extends SubsystemBase {
 
   private final Pivot turret = new Pivot(turretConfig);
 
-  private double filteredTrackingTxDegrees = 0.0;
   private double lastTrackingOutput = 0.0;
-  private double lastTrackingTargetAngleDegrees = 0.0;
+  private double filteredTrackingTxDegrees = 0.0;
   private int lastTrackingTagId = -1;
   private double lastTrackingTimestampSeconds = -1.0;
-  private boolean hasTrackingSample = false;
+  private double lastCommandedAngleDegrees = 0.0;
 
   public TurretSubsystem() {
   }
@@ -121,6 +109,65 @@ public class TurretSubsystem extends SubsystemBase {
     return spark.getEncoder().getPosition();
   }
 
+  public Command set(double dutyCycle) {
+    return turret.set(dutyCycle);
+  }
+
+  public void setOpenLoop(double dutyCycle) {
+    smc.setDutyCycle(dutyCycle);
+    lastTrackingOutput = dutyCycle;
+  }
+
+  public void setClosedLoopAngle(Angle angle) {
+    Angle clampedAngle = Degrees.of(Math.max(-MAX_ONE_DIR_FOV, Math.min(MAX_ONE_DIR_FOV, angle.in(Degrees))));
+    smc.setPosition(clampedAngle);
+    lastCommandedAngleDegrees = clampedAngle.in(Degrees);
+    Logger.recordOutput("Turret/CommandedAngleDegrees", lastCommandedAngleDegrees);
+  }
+
+  public Command manualSet(Supplier<Double> dutyCycleSupplier) {
+    return run(() -> {
+      double rawInput = dutyCycleSupplier.get();
+      double currentAngleDegrees = turret.getAngle().in(Degrees);
+      double scaledOutput = applySoftLimitScaling(rawInput, currentAngleDegrees);
+      setOpenLoop(scaledOutput);
+    }).finallyDo(() -> setOpenLoop(0.0)).withName("Turret.manualSet");
+  }
+
+  public Command rezero() {
+    return Commands.runOnce(() -> spark.getEncoder().setPosition(0), this).withName("Turret.Rezero");
+  }
+
+  public Command sysId() {
+    return turret.sysId(Volts.of(7), Volts.of(2).per(Second), Seconds.of(10));
+  }
+
+  public void clearTrackingTelemetry() {
+    lastTrackingOutput = 0.0;
+    filteredTrackingTxDegrees = 0.0;
+    lastTrackingTagId = -1;
+    lastTrackingTimestampSeconds = -1.0;
+    Logger.recordOutput("Turret/TrackingState", "NO_TARGET");
+    Logger.recordOutput("Turret/TrackingTagID", -1);
+    Logger.recordOutput("Turret/FilteredTX", 0.0);
+    Logger.recordOutput("Turret/TrackingDutyCycle", 0.0);
+    Logger.recordOutput("Turret/TrackingLastValidAgeSec", -1.0);
+    Logger.recordOutput("Turret/CommandedAngleDegrees", lastCommandedAngleDegrees);
+  }
+
+  public void updateTrackingTelemetry(int tagId, double filteredTxDegrees, double dutyCycle) {
+    lastTrackingTagId = tagId;
+    filteredTrackingTxDegrees = filteredTxDegrees;
+    lastTrackingOutput = dutyCycle;
+    lastTrackingTimestampSeconds = Timer.getFPGATimestamp();
+    Logger.recordOutput("Turret/TrackingState", "TRACKING");
+    Logger.recordOutput("Turret/TrackingTagID", tagId);
+    Logger.recordOutput("Turret/FilteredTX", filteredTxDegrees);
+    Logger.recordOutput("Turret/TrackingDutyCycle", dutyCycle);
+    Logger.recordOutput("Turret/TrackingLastValidAgeSec", 0.0);
+    Logger.recordOutput("Turret/CommandedAngleDegrees", lastCommandedAngleDegrees);
+  }
+
   public double getLastTrackingOutput() {
     return lastTrackingOutput;
   }
@@ -133,10 +180,6 @@ public class TurretSubsystem extends SubsystemBase {
     return lastTrackingTagId;
   }
 
-  public boolean hasTrackingSample() {
-    return hasTrackingSample;
-  }
-
   public double getLastValidTrackingAgeSeconds() {
     if (lastTrackingTimestampSeconds < 0.0) {
       return -1.0;
@@ -146,130 +189,17 @@ public class TurretSubsystem extends SubsystemBase {
 
   public boolean isTrackingHealthy() {
     double ageSeconds = getLastValidTrackingAgeSeconds();
-    return hasTrackingSample
-        && lastTrackingTagId != -1
+    return lastTrackingTagId != -1
         && ageSeconds >= 0.0
         && ageSeconds <= TRACK_HEALTH_MAX_AGE_SECONDS
         && Math.abs(filteredTrackingTxDegrees) <= TRACK_HEALTH_MAX_TX_DEGREES;
-  }
-
-  public Command set(double dutyCycle) {
-    return turret.set(dutyCycle);
-  }
-
-  public Command manualSet(Supplier<Double> dutyCycleSupplier) {
-    return run(() -> {
-      double rawInput = dutyCycleSupplier.get();
-      double currentAngleDegrees = turret.getAngle().in(Degrees);
-      double output = applySoftLimitScaling(rawInput, currentAngleDegrees);
-      smc.setDutyCycle(output);
-      lastTrackingOutput = output;
-    }).finallyDo(() -> smc.setDutyCycle(0.0)).withName("Turret.manualSet");
-  }
-
-  public Command rezero() {
-    return Commands.runOnce(() -> spark.getEncoder().setPosition(0), this)
-        .withName("Turret.rezero");
-  }
-
-  public Command sysId() {
-    return turret.sysId(Volts.of(7), Volts.of(2).per(Second), Seconds.of(10));
-  }
-
-  public Command trackTarget(LimeLight limelight) {
-    return trackTarget(limelight, null, TRACKING_TAG_IDS);
-  }
-
-  public Command trackTarget(LimeLight limelight, SwerveSubsystem drivebase) {
-    return trackTarget(limelight, drivebase, TRACKING_TAG_IDS);
-  }
-
-  public Command trackTarget(LimeLight limelight, SwerveSubsystem drivebase, Set<Integer> allowedTagIds) {
-    return run(() -> {
-      LimeLight.AprilTagScan scan = limelight.scanDirect(allowedTagIds);
-
-      if (!scan.isValid() || !Double.isFinite(scan.tx)) {
-        clearTrackingState();
-        smc.setDutyCycle(0.0);
-        return;
-      }
-
-      if (!hasTrackingSample || scan.tagID != lastTrackingTagId) {
-        filteredTrackingTxDegrees = scan.tx;
-      } else {
-        filteredTrackingTxDegrees +=
-            (scan.tx - filteredTrackingTxDegrees) * TRACK_TX_FILTER_ALPHA;
-      }
-
-      if (Math.abs(filteredTrackingTxDegrees) < TRACK_DEADBAND_DEGREES) {
-        filteredTrackingTxDegrees = 0.0;
-      }
-
-      double currentAngleDegrees = turret.getAngle().in(Degrees);
-      double output = TRACK_OUTPUT_SIGN * filteredTrackingTxDegrees * TRACK_KP;
-      if (Math.abs(filteredTrackingTxDegrees) > TRACK_DEADBAND_DEGREES
-          && Math.abs(output) < TRACK_MIN_OUTPUT) {
-        output = Math.copySign(TRACK_MIN_OUTPUT, output);
-      }
-      output = MathUtil.clamp(output, -TRACK_MAX_OUTPUT, TRACK_MAX_OUTPUT);
-      output = applySoftLimitScaling(output, currentAngleDegrees);
-
-      smc.setDutyCycle(output);
-      lastTrackingOutput = output;
-      lastTrackingTargetAngleDegrees = currentAngleDegrees + (filteredTrackingTxDegrees * TRACK_OUTPUT_SIGN);
-      lastTrackingTagId = scan.tagID;
-      lastTrackingTimestampSeconds = Timer.getFPGATimestamp();
-      hasTrackingSample = true;
-
-      Logger.recordOutput("Turret/TrackingState", "TRACKING");
-      Logger.recordOutput("Turret/TrackingTagID", scan.tagID);
-      Logger.recordOutput("Turret/RawTX", scan.tx);
-      Logger.recordOutput("Turret/FilteredTX", filteredTrackingTxDegrees);
-      Logger.recordOutput("Turret/TrackingDutyCycle", output);
-      Logger.recordOutput("Turret/TrackingTargetAngleDegrees", lastTrackingTargetAngleDegrees);
-      Logger.recordOutput("Turret/TrackingAngleErrorDegrees", filteredTrackingTxDegrees);
-      Logger.recordOutput("Turret/TargetDistanceM", scan.distance);
-      Logger.recordOutput("Turret/TrackingLastValidAgeSec", 0.0);
-    }).beforeStarting(this::clearTrackingState)
-        .finallyDo(interrupted -> {
-          smc.setDutyCycle(0.0);
-          lastTrackingOutput = 0.0;
-        })
-        .withName("Turret.trackTarget");
-  }
-
-  private void clearTrackingState() {
-    filteredTrackingTxDegrees = 0.0;
-    lastTrackingOutput = 0.0;
-    lastTrackingTargetAngleDegrees = turret.getAngle().in(Degrees);
-    lastTrackingTagId = -1;
-    lastTrackingTimestampSeconds = -1.0;
-    hasTrackingSample = false;
-    Logger.recordOutput("Turret/TrackingState", "NO_TARGET");
-    Logger.recordOutput("Turret/TrackingTagID", -1);
-    Logger.recordOutput("Turret/FilteredTX", 0.0);
-    Logger.recordOutput("Turret/TrackingTargetAngleDegrees", lastTrackingTargetAngleDegrees);
-    Logger.recordOutput("Turret/TrackingAngleErrorDegrees", 0.0);
-  }
-
-  private double applySoftLimitScaling(double input, double currentAngleDegrees) {
-    double distanceToPositiveLimit = MAX_ONE_DIR_FOV - currentAngleDegrees;
-    double distanceToNegativeLimit = currentAngleDegrees - (-MAX_ONE_DIR_FOV);
-    double scale = 1.0;
-
-    if (input > 0.0 && distanceToPositiveLimit < SLOW_ZONE_DEGREES) {
-      scale = Math.max(0.0, distanceToPositiveLimit / SLOW_ZONE_DEGREES);
-    } else if (input < 0.0 && distanceToNegativeLimit < SLOW_ZONE_DEGREES) {
-      scale = Math.max(0.0, distanceToNegativeLimit / SLOW_ZONE_DEGREES);
-    }
-
-    return input * scale;
   }
 
   @Override
   public void periodic() {
     turret.updateTelemetry();
     Logger.recordOutput("Turret/AngleDegrees", turret.getAngle().in(Degrees));
+    Logger.recordOutput("Turret/AngleErrorDegrees", lastCommandedAngleDegrees - turret.getAngle().in(Degrees));
     Logger.recordOutput("Turret/RawEncoderRotations", spark.getEncoder().getPosition());
     Logger.recordOutput("Turret/LastTrackingOutput", lastTrackingOutput);
     Logger.recordOutput("ASCalibration/FinalComponentPoses", new Pose3d[] {
@@ -282,5 +212,41 @@ public class TurretSubsystem extends SubsystemBase {
   @Override
   public void simulationPeriodic() {
     turret.simIterate();
+  }
+
+  private double applySoftLimitScaling(double input, double currentAngleDeg) {
+    double distanceToPositiveLimit = MAX_ONE_DIR_FOV - currentAngleDeg;
+    double distanceToNegativeLimit = currentAngleDeg - (-MAX_ONE_DIR_FOV);
+
+    double scale = 1.0;
+    if (input > 0.0 && distanceToPositiveLimit < SLOW_ZONE_DEGREES) {
+      scale = Math.max(0.0, distanceToPositiveLimit / SLOW_ZONE_DEGREES);
+    } else if (input < 0.0 && distanceToNegativeLimit < SLOW_ZONE_DEGREES) {
+      scale = Math.max(0.0, distanceToNegativeLimit / SLOW_ZONE_DEGREES);
+    }
+
+    return input * scale;
+  }
+
+  public void reportTrackingCommand(
+      int tagId,
+      double rawTxDegrees,
+      double correctedTxDegrees,
+      double filteredTxDegrees,
+      double currentAngleDegrees,
+      double requestedTargetDegrees,
+      double steppedTargetDegrees) {
+    String line = String.format(
+        "TURRET_TRACK_DEBUG,tag=%d,raw_tx=%.2f,corrected_tx=%.2f,filtered_tx=%.2f,current_deg=%.2f,requested_deg=%.2f,commanded_deg=%.2f,error_deg=%.2f",
+        tagId,
+        rawTxDegrees,
+        correctedTxDegrees,
+        filteredTxDegrees,
+        currentAngleDegrees,
+        requestedTargetDegrees,
+        steppedTargetDegrees,
+        steppedTargetDegrees - currentAngleDegrees);
+    System.out.println(line);
+    DriverStation.reportWarning(line, false);
   }
 }

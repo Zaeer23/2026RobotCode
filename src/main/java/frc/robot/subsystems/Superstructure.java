@@ -12,6 +12,7 @@ import static edu.wpi.first.units.Units.RPM;
 import edu.wpi.first.units.measure.Angle;
 import edu.wpi.first.units.measure.AngularVelocity;
 import edu.wpi.first.units.measure.LinearVelocity;
+import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
@@ -27,6 +28,12 @@ public class Superstructure extends SubsystemBase {
 
   private static final Set<Integer> CLIMB_BAR_TAG_IDS = Set.of(15, 16, 31, 32);
   private static final Set<Integer> HUB_TAG_IDS = Set.of(9, 10, 11, 18, 19, 20);
+  private static final double TURRET_TRACK_TX_FILTER_ALPHA = 0.35;
+  private static final double TURRET_TRACK_DEADBAND_DEGREES = 0.75;
+  private static final double TURRET_TRACK_OUTPUT_SIGN = -1.0;
+  private static final double TURRET_TRACK_KP = 0.018;
+  private static final double TURRET_TRACK_MIN_OUTPUT = 0.045;
+  private static final double TURRET_TRACK_MAX_OUTPUT = 0.18;
 
   public final ShooterSubsystem shooter;
   public final TurretSubsystem turret;
@@ -261,13 +268,149 @@ public Command manualTurretControl(Supplier<Double> speedSupplier) {
   public Command limelightShootCommand(SwerveSubsystem drivebase) {
     return Commands.parallel(
         shooter.setSpeedFromLimelight(limelight, 45.0, HUB_TAG_IDS),
-        turret.trackTarget(limelight, drivebase))
+        trackTargetCommand(limelight))
         .withName("Superstructure.limelightShoot");
   }
 
+  private void runTurretTrackingStep(
+      LimeLight limelight,
+      double nowSeconds,
+      double[] lastLogTimeSecondsHolder,
+      double[] filteredTxDegreesHolder,
+      boolean[] hasSampleHolder) {
+    double lastLogTimeSeconds = lastLogTimeSecondsHolder[0];
+    if (lastLogTimeSeconds < 0.0 || nowSeconds - lastLogTimeSeconds >= 0.5) {
+      String line = String.format(
+          "TURRET_TRACK_HEARTBEAT,time=%.3f,manual_deg=%.2f",
+          nowSeconds,
+          turret.getRawAngle().in(Degrees));
+      System.out.println(line);
+      DriverStation.reportWarning(line, false);
+      lastLogTimeSecondsHolder[0] = nowSeconds;
+    }
+
+    LimeLight.AprilTagScan scan = limelight.scanDirect(HUB_TAG_IDS);
+    if (!scan.isValid() || !Double.isFinite(scan.tx)) {
+      hasSampleHolder[0] = false;
+      turret.setOpenLoop(0.0);
+      turret.clearTrackingTelemetry();
+      String line = String.format(
+          "TURRET_TRACK_DEBUG,NO_TARGET,hasTarget=%b,tag=%d,tx=%.2f",
+          scan.hasTarget,
+          scan.tagID,
+          scan.tx);
+      System.out.println(line);
+      DriverStation.reportWarning(line, false);
+      return;
+    }
+
+    double correctedTxDegrees = scan.tx;
+    double filteredTxDegrees = filteredTxDegreesHolder[0];
+    if (!hasSampleHolder[0]) {
+      filteredTxDegrees = correctedTxDegrees;
+      hasSampleHolder[0] = true;
+    } else {
+      filteredTxDegrees +=
+          (correctedTxDegrees - filteredTxDegrees) * TURRET_TRACK_TX_FILTER_ALPHA;
+    }
+    filteredTxDegreesHolder[0] = filteredTxDegrees;
+
+    if (Math.abs(filteredTxDegrees) < TURRET_TRACK_DEADBAND_DEGREES) {
+      filteredTxDegrees = 0.0;
+      filteredTxDegreesHolder[0] = 0.0;
+    }
+
+    double currentTurretDegrees = turret.getRawAngle().in(Degrees);
+    double requestedTargetDegrees = currentTurretDegrees - filteredTxDegrees;
+    double output = 0.0;
+    if (filteredTxDegrees != 0.0) {
+      output = TURRET_TRACK_OUTPUT_SIGN * filteredTxDegrees * TURRET_TRACK_KP;
+      if (Math.abs(output) < TURRET_TRACK_MIN_OUTPUT) {
+        output = Math.copySign(TURRET_TRACK_MIN_OUTPUT, output);
+      }
+      output = Math.max(-TURRET_TRACK_MAX_OUTPUT, Math.min(TURRET_TRACK_MAX_OUTPUT, output));
+    }
+
+    // Never keep driving harder into a mechanical stop.
+    if ((currentTurretDegrees <= -89.0 && output < 0.0)
+        || (currentTurretDegrees >= 89.0 && output > 0.0)) {
+      output = 0.0;
+    }
+
+    turret.setOpenLoop(output);
+    turret.updateTrackingTelemetry(
+        scan.tagID,
+        filteredTxDegrees,
+        output);
+    turret.reportTrackingCommand(
+        scan.tagID,
+        scan.tx,
+        correctedTxDegrees,
+        filteredTxDegrees,
+        currentTurretDegrees,
+        requestedTargetDegrees,
+        currentTurretDegrees + output * 100.0);
+  }
+
 public Command trackTargetCommand(LimeLight limelight) {
-    return turret.trackTarget(limelight).withName("Superstructure.trackTarget");
+    return Commands.run(
+        new Runnable() {
+          private final double[] lastLogTimeSeconds = {-1.0};
+          private final double[] filteredTxDegrees = {0.0};
+          private final boolean[] hasSample = {false};
+
+          @Override
+          public void run() {
+            double nowSeconds = edu.wpi.first.wpilibj.Timer.getFPGATimestamp();
+            runTurretTrackingStep(limelight, nowSeconds, lastLogTimeSeconds, filteredTxDegrees, hasSample);
+          }
+        },
+        turret)
+        .beforeStarting(() -> {
+          turret.clearTrackingTelemetry();
+          System.out.println("TURRET_TRACK_COMMAND_START");
+          DriverStation.reportWarning("TURRET_TRACK_COMMAND_START", false);
+        })
+        .finallyDo(interrupted -> {
+          turret.setOpenLoop(0.0);
+          turret.clearTrackingTelemetry();
+          System.out.println("TURRET_TRACK_COMMAND_END");
+          DriverStation.reportWarning("TURRET_TRACK_COMMAND_END", false);
+        })
+        .withName("Superstructure.trackTarget");
 }
+
+  public Command turretAssistCommand(Supplier<Double> manualInputSupplier) {
+    return Commands.run(
+        new Runnable() {
+          private final double[] lastLogTimeSeconds = {-1.0};
+          private final double[] filteredTxDegrees = {0.0};
+          private final boolean[] hasSample = {false};
+
+          @Override
+          public void run() {
+          double manualInput = manualInputSupplier.get();
+          if (Math.abs(manualInput) > 0.12) {
+            double shapedManualInput = Math.copySign(manualInput * manualInput, manualInput);
+            turret.setOpenLoop(shapedManualInput);
+            turret.clearTrackingTelemetry();
+            return;
+          }
+
+          runTurretTrackingStep(
+              limelight,
+              edu.wpi.first.wpilibj.Timer.getFPGATimestamp(),
+              lastLogTimeSeconds,
+              filteredTxDegrees,
+              hasSample);
+        }},
+        turret)
+        .finallyDo(interrupted -> {
+          turret.setOpenLoop(0.0);
+          turret.clearTrackingTelemetry();
+        })
+        .withName("Superstructure.turretAssist");
+  }
 
 
 
