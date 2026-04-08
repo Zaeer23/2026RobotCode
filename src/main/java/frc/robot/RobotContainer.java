@@ -3,7 +3,6 @@
 // the WPILib BSD license file in the root directory of this project.
 
 package frc.robot;
-import java.util.Set;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.controller.ProfiledPIDController;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -47,7 +46,6 @@ import static edu.wpi.first.units.Units.Degrees;
  */
 public class RobotContainer
 {
-  private static final Set<Integer> HUB_TAG_IDS = Set.of(9, 10, 11, 18, 19, 20);
   private static final double ALT_TURRET_MANUAL_SPEED = 0.18;
 
   // Replace with CommandPS4Controller or CommandJoystick if needed
@@ -174,9 +172,6 @@ m_intake.setDefaultCommand(
     new Trigger(() -> isCurrentShooterProfile() && shooterXbox.x().getAsBoolean())
         .whileTrue(m_hopper.backFeedCommand());
 
-    new Trigger(() -> isCurrentShooterProfile() && shooterXbox.rightBumper().getAsBoolean())
-        .whileTrue(
-        m_shooter.setSpeedFromLimelight(m_limelight, 45.0, HUB_TAG_IDS));
     //shooterXbox.leftBumper().whileTrue(m_climber.climbDownCommand());
     //shooterXbox.leftTrigger(0.1).whileTrue(m_climber.climbUpCommand());
 
@@ -303,7 +298,7 @@ m_intake.setDefaultCommand(
    */
   public Command getAutonomousCommand()
   {
-    return new ShootingCommand(m_shooter, m_limelight, m_kicker, m_hopper, HUB_TAG_IDS);
+    return new ShootingCommand(m_shooter, m_kicker, m_hopper);
   }
 
   public void setMotorBrake(boolean brake)
@@ -318,9 +313,10 @@ m_intake.setDefaultCommand(
 
   private ChassisSpeeds getScaledRobotRelativeDrive()
   {
-    double driveScale = m_shuffleboard.getSelectedDriveSpeedScale();
     double maxLinearSpeed = drivebase.getSwerveDrive().getMaximumChassisVelocity();
     double maxAngularSpeed = drivebase.getSwerveDrive().getMaximumChassisAngularVelocity();
+    double selectedLinearSpeed = Math.min(m_shuffleboard.getSelectedDriveSpeedMetersPerSecond(), maxLinearSpeed);
+    double driveScale = maxLinearSpeed > 0.0 ? selectedLinearSpeed / maxLinearSpeed : 0.0;
 
     double forward = -driverXbox.getLeftY() * driveScale * maxLinearSpeed;
     double strafeLeft = -driverXbox.getLeftX() * driveScale * maxLinearSpeed;

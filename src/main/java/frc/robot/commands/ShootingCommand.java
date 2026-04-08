@@ -1,12 +1,9 @@
 package frc.robot.commands;
 
-import java.util.Set;
-
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.SequentialCommandGroup;
 import frc.robot.subsystems.HopperSubsystem;
 import frc.robot.subsystems.KickerSubsystem;
-import frc.robot.subsystems.LimeLight;
 import frc.robot.subsystems.ShooterSubsystem;
 
 public class ShootingCommand extends SequentialCommandGroup {
@@ -17,23 +14,21 @@ public class ShootingCommand extends SequentialCommandGroup {
 
   public ShootingCommand(
       ShooterSubsystem shooter,
-      LimeLight limelight,
       KickerSubsystem kicker,
-      HopperSubsystem hopper,
-      Set<Integer> hubTagIds) {
+      HopperSubsystem hopper) {
     addCommands(
         Commands.deadline(
             Commands.waitSeconds(SPINUP_SECONDS),
             shooter.spinUp()),
         Commands.deadline(
             Commands.waitSeconds(FIRST_FEED_SECONDS),
-            shooter.setSpeedFromLimelight(limelight, 45.0, hubTagIds),
+            shooter.spinUp(),
             kicker.feedCommand(),
             hopper.feedCommand()),
         
         Commands.deadline(
             Commands.waitSeconds(STOP_BACKFEED_SECONDS),
-            shooter.setSpeedFromLimelight(limelight, 45.0, hubTagIds),
+            shooter.spinUp(),
             kicker.stopCommand(),
             hopper.stopCommand()),
         

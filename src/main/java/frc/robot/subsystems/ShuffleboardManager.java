@@ -8,6 +8,7 @@ import java.util.Map;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
+import edu.wpi.first.math.util.Units;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
@@ -313,7 +314,7 @@ public class ShuffleboardManager {
                 .withProperties(Map.of("Min", 0.0, "Max", 5.0));
         entryFieldZone = matchVision.add("Field Zone", "Center");
         entryActiveControlSet = matchVision.add("Controls", ShooterControlProfile.CURRENT.toString());
-        entrySelectedDriveScale = matchVision.add("Drive Scale", 0.65);
+        entrySelectedDriveScale = matchVision.add("Drive Speed", 6.5);
         entrySelectedStartPose = matchVision.add("Start Pose", StartPosition.CENTER.toString());
 
         initializeFieldDecor();
@@ -408,7 +409,7 @@ public class ShuffleboardManager {
         entryMatchSpeed.getEntry().setDouble(round2(Math.hypot(speeds.vxMetersPerSecond, speeds.vyMetersPerSecond)));
         entryFieldZone.getEntry().setString(describeFieldZone(pose));
         entryActiveControlSet.getEntry().setString(getSelectedControlProfile().toString());
-        entrySelectedDriveScale.getEntry().setDouble(getSelectedDriveSpeedScale());
+        entrySelectedDriveScale.getEntry().setDouble(getSelectedDriveSpeedFeetPerSecond());
         entrySelectedStartPose.getEntry().setString(getSelectedStartPosition().toString());
         SmartDashboard.putString("Dashboard/ActiveTab", MATCH_TAB);
     }
@@ -450,9 +451,11 @@ public class ShuffleboardManager {
                 ShooterControlProfile.ALT_TWO.toString(),
                 ShooterControlProfile.ALT_TWO);
 
-        driveSpeedChooser.setDefaultOption("65%", 0.65);
-        driveSpeedChooser.addOption("35%", 0.35);
-        driveSpeedChooser.addOption("100%", 1.00);
+        driveSpeedChooser.setDefaultOption("6.5 ft/s", Units.feetToMeters(6.5));
+        driveSpeedChooser.addOption("4.0 ft/s", Units.feetToMeters(4.0));
+        driveSpeedChooser.addOption("8.5 ft/s", Units.feetToMeters(8.5));
+        driveSpeedChooser.addOption("10.5 ft/s", Units.feetToMeters(10.5));
+        driveSpeedChooser.addOption("12.5 ft/s", Units.feetToMeters(12.5));
 
         startPositionChooser.setDefaultOption(StartPosition.CENTER.toString(), StartPosition.CENTER);
         startPositionChooser.addOption(StartPosition.AMP_SIDE.toString(), StartPosition.AMP_SIDE);
@@ -464,9 +467,13 @@ public class ShuffleboardManager {
         return selected != null ? selected : ShooterControlProfile.CURRENT;
     }
 
-    public double getSelectedDriveSpeedScale() {
+    public double getSelectedDriveSpeedMetersPerSecond() {
         Double selected = driveSpeedChooser.getSelected();
-        return selected != null ? selected.doubleValue() : 0.65;
+        return selected != null ? selected.doubleValue() : Units.feetToMeters(6.5);
+    }
+
+    public double getSelectedDriveSpeedFeetPerSecond() {
+        return Units.metersToFeet(getSelectedDriveSpeedMetersPerSecond());
     }
 
     public StartPosition getSelectedStartPosition() {
