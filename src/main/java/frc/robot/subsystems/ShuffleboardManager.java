@@ -4,10 +4,12 @@ import static edu.wpi.first.units.Units.Degrees;
 import static edu.wpi.first.units.Units.RPM;
 
 import java.util.Map;
+import java.util.function.Supplier;
 
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
 import edu.wpi.first.wpilibj.shuffleboard.Shuffleboard;
@@ -24,14 +26,18 @@ public class ShuffleboardManager {
     private static final String PREMATCH_TAB = "2026 Pre-Match";
     private static final String SHOOTING_TAB = "2026 Shooting";
     private static final String DRIVE_TAB = "2026 Drive";
-    private static final String MATCH_TAB = "2026 Match";
-    private static final String DASHBOARD_BUILD = "2026_MATCH_V3";
+    private static final String DRIVER_TAB = "2026 Driver";
+    private static final String DASHBOARD_BUILD = "2026_MATCH_V4";
+    private static final String[] DRIVE_SPEED_OPTIONS = {"35%", "65%", "100%"};
 
     private final LimeLight limelight;
     private final Superstructure superstructure;
     private final SwerveSubsystem drivebase;
     private final TurretSubsystem turret;
     private final Field2d field = new Field2d();
+    private final Supplier<String> driveSpeedSelectionSupplier;
+    private final java.util.function.Consumer<String> driveSpeedSelectionConsumer;
+    private final SendableChooser<String> driveSpeedChooser = new SendableChooser<>();
 
     private final SimpleWidget entryAlliance;
     private final SimpleWidget entryDriverStation;
@@ -93,12 +99,16 @@ public class ShuffleboardManager {
             LimeLight limelight,
             Superstructure superstructure,
             SwerveSubsystem drivebase,
-            TurretSubsystem turret) {
+            TurretSubsystem turret,
+            Supplier<String> driveSpeedSelectionSupplier,
+            java.util.function.Consumer<String> driveSpeedSelectionConsumer) {
 
         this.limelight = limelight;
         this.superstructure = superstructure;
         this.drivebase = drivebase;
         this.turret = turret;
+        this.driveSpeedSelectionSupplier = driveSpeedSelectionSupplier;
+        this.driveSpeedSelectionConsumer = driveSpeedSelectionConsumer;
 
         SmartDashboard.putString("Dashboard/Build", DASHBOARD_BUILD);
         System.out.println("[SHUFFLEBOARD] Initializing " + DASHBOARD_BUILD);
@@ -220,43 +230,41 @@ public class ShuffleboardManager {
                 .withWidget(BuiltInWidgets.kNumberBar)
                 .withProperties(Map.of("Min", 0.0, "Max", 5.0));
 
-        ShuffleboardTab matchTab = Shuffleboard.getTab(MATCH_TAB);
-        matchTab.add("2026 Field", field)
-                .withWidget(BuiltInWidgets.kField)
+        configureChoosers();
+
+        ShuffleboardTab matchTab = Shuffleboard.getTab(DRIVER_TAB);
+        matchTab.addCamera("Driver Camera",
+                        "Driver Camera",
+                        "http://localhost:1181/?action=stream")
                 .withPosition(0, 0)
-                .withSize(8, 5);
+                .withSize(6, 4);
 
-        ShuffleboardLayout matchVision = matchTab
-                .getLayout("Driver Overlay", BuiltInLayouts.kGrid)
-                .withPosition(8, 0)
-                .withSize(4, 5)
-                .withProperties(Map.of("Number of columns", 2, "Number of rows", 6));
+        matchTab.add("Drive Speed", driveSpeedChooser)
+                .withWidget(BuiltInWidgets.kComboBoxChooser)
+                .withPosition(0, 4)
+                .withSize(6, 1);
 
-        entryMatchHasTarget = matchVision.add("Target Lock", false).withWidget(BuiltInWidgets.kBooleanBox);
-        entryMatchReady = matchVision.add("Ready", false).withWidget(BuiltInWidgets.kBooleanBox);
-        entryMatchTurretHealth = matchVision.add("Turret Health", false).withWidget(BuiltInWidgets.kBooleanBox);
-        entryMatchTagId = matchVision.add("Target Tag", -1);
-        entryMatchStream = matchVision.add("Stream", "SEARCHING");
-        entryMatchTx = matchVision.add("TX", 0.0);
-        entryMatchTy = matchVision.add("TY", 0.0);
-        entryMatchDistance = matchVision.add("Distance", 0.0);
-        entryMatchLatency = matchVision.add("Latency", 0.0);
-        entryMatchTurret = matchVision.add("Turret Deg", 0.0)
-                .withWidget(BuiltInWidgets.kDial)
-                .withProperties(Map.of("Min", -90.0, "Max", 90.0, "Show value", true));
-        entryMatchShooter = matchVision.add("Shooter RPM", 0.0)
-                .withWidget(BuiltInWidgets.kNumberBar)
-                .withProperties(Map.of("Min", 0.0, "Max", 6000.0));
-        entryMatchSpeed = matchVision.add("Speed", 0.0)
-                .withWidget(BuiltInWidgets.kNumberBar)
-                .withProperties(Map.of("Min", 0.0, "Max", 5.0));
-        entryFieldZone = matchVision.add("Field Zone", "Center");
+        entryMatchHasTarget = null;
+        entryMatchReady = null;
+        entryMatchTurretHealth = null;
+        entryMatchTagId = null;
+        entryMatchStream = null;
+        entryMatchTx = null;
+        entryMatchTy = null;
+        entryMatchDistance = null;
+        entryMatchLatency = null;
+        entryMatchTurret = null;
+        entryMatchShooter = null;
+        entryMatchSpeed = null;
+        entryFieldZone = null;
 
         initializeFieldDecor();
-        Shuffleboard.selectTab(MATCH_TAB);
+        Shuffleboard.selectTab(DRIVER_TAB);
     }
 
     public void update(ShotSolution activeSolution) {
+        syncDriverSelections();
+
         entryAlliance.getEntry().setString(
                 DriverStation.getAlliance().map(a -> a == DriverStation.Alliance.Red ? "RED" : "BLUE").orElse("Unknown"));
         entryDriverStation.getEntry().setInteger(DriverStation.getLocation().orElse(-1));
@@ -330,20 +338,7 @@ public class ShuffleboardManager {
         entryVelocityY.getEntry().setDouble(round2(speeds.vyMetersPerSecond));
         entryTotalSpeed.getEntry().setDouble(round2(Math.hypot(speeds.vxMetersPerSecond, speeds.vyMetersPerSecond)));
 
-        entryMatchHasTarget.getEntry().setBoolean(hasTarget);
-        entryMatchReady.getEntry().setBoolean(shooterReady && turretReady && hoodReady && hasTarget);
-        entryMatchTurretHealth.getEntry().setBoolean(turret.isTrackingHealthy());
-        entryMatchTagId.getEntry().setInteger(directScan.tagID);
-        entryMatchStream.getEntry().setString(hasTarget ? "TRACKING" : "SEARCHING");
-        entryMatchTx.getEntry().setDouble(round2(directScan.tx));
-        entryMatchTy.getEntry().setDouble(round2(directScan.ty));
-        entryMatchDistance.getEntry().setDouble(round2(directScan.distance));
-        entryMatchLatency.getEntry().setDouble(round1(directScan.latencyMs));
-        entryMatchTurret.getEntry().setDouble(round1(turretDeg));
-        entryMatchShooter.getEntry().setDouble(round1(shooterRPM));
-        entryMatchSpeed.getEntry().setDouble(round2(Math.hypot(speeds.vxMetersPerSecond, speeds.vyMetersPerSecond)));
-        entryFieldZone.getEntry().setString(describeFieldZone(pose));
-        SmartDashboard.putString("Dashboard/ActiveTab", MATCH_TAB);
+        SmartDashboard.putString("Dashboard/ActiveTab", DRIVER_TAB);
     }
 
     public void update() {
@@ -388,5 +383,21 @@ public class ShuffleboardManager {
 
     private double round2(double v) {
         return Math.round(v * 100.0) / 100.0;
+    }
+
+    private void configureChoosers() {
+        driveSpeedChooser.setDefaultOption(DRIVE_SPEED_OPTIONS[1], DRIVE_SPEED_OPTIONS[1]);
+        for (String option : DRIVE_SPEED_OPTIONS) {
+            if (!DRIVE_SPEED_OPTIONS[1].equals(option)) {
+                driveSpeedChooser.addOption(option, option);
+            }
+        }
+    }
+
+    private void syncDriverSelections() {
+        String selectedSpeed = driveSpeedChooser.getSelected();
+        if (selectedSpeed != null && !selectedSpeed.equals(driveSpeedSelectionSupplier.get())) {
+            driveSpeedSelectionConsumer.accept(selectedSpeed);
+        }
     }
 }

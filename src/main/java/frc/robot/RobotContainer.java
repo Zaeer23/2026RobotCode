@@ -47,6 +47,7 @@ import static edu.wpi.first.units.Units.Degrees;
 public class RobotContainer
 {
   private static final double[] DRIVE_SPEED_PRESETS = {0.35, 0.65, 1.0};
+  private static final String[] DRIVE_SPEED_PRESET_LABELS = {"35%", "65%", "100%"};
   private static final Set<Integer> HUB_TAG_IDS = Set.of(9, 10, 11, 18, 19, 20);
 
   // Replace with CommandPS4Controller or CommandJoystick if needed
@@ -123,7 +124,12 @@ private final Superstructure m_superstructure = new Superstructure(
     m_shooter, m_turret, m_hood, m_intake, m_hopper, m_kicker, m_limelight
 );
 private final ShuffleboardManager m_shuffleboard = new ShuffleboardManager(
-    m_limelight, m_superstructure, drivebase, m_turret
+    m_limelight,
+    m_superstructure,
+    drivebase,
+    m_turret,
+    this::getDriveSpeedPresetLabel,
+    this::setDriveSpeedPresetByLabel
 );
 
   public RobotContainer()
@@ -154,12 +160,10 @@ private final ShuffleboardManager m_shuffleboard = new ShuffleboardManager(
     new Trigger(() -> Math.abs(shooterXbox.getRightX()) > 0.12)
         .whileTrue(m_superstructure.manualTurretControl(() -> {
           double input = shooterXbox.getRightX();
-          return Math.copySign(input * input, input);
+          return Math.copySign(input * input * 0.55, input);
         }));
 
-m_intake.setDefaultCommand(
-    m_intake.joystickPivotTwoPosition(() -> -shooterXbox.getLeftY())
-);
+    m_intake.setDefaultCommand(m_intake.manualPivot(() -> -shooterXbox.getLeftY()));
     shooterXbox.x().whileTrue(m_hopper.backFeedCommand());
 
     shooterXbox.rightBumper().whileTrue(m_superstructure.limelightShootCommand(drivebase));
@@ -192,16 +196,12 @@ shooterXbox.b().whileTrue(m_superstructure.intakeCommand());
     new Trigger(DriverStation::isEnabled)
         .onTrue(drivebase.centerModulesCommand().withTimeout(0.25));
 
-    Command driveRobotRelativeAngularVelocity = Commands.run(
-        () -> drivebase.drive(getScaledRobotRelativeDrive()),
+    Command fieldRelativeAngularVelocityDrive = Commands.run(
+        () -> drivebase.drive(getDriveTranslation(),
+                              getDriveRotation(),
+                              false),
         drivebase);
-    Command absoluteDriveCommand = new AbsoluteDrive(
-        drivebase,
-        () -> driverXbox.getLeftY(),
-        () -> driverXbox.getLeftX(),
-        () -> Math.abs(driverXbox.getRightX()) > OperatorConstants.DEADBAND ? driverXbox.getRightX() : 0.0,
-        () -> Math.abs(driverXbox.getRightY()) > OperatorConstants.DEADBAND ? -driverXbox.getRightY() : 0.0);
-    drivebase.setDefaultCommand(absoluteDriveCommand);
+    drivebase.setDefaultCommand(fieldRelativeAngularVelocityDrive);
 
     if (Robot.isSimulation())
     {
@@ -232,7 +232,7 @@ shooterXbox.b().whileTrue(m_superstructure.intakeCommand());
     }
     if (DriverStation.isTest())
     {
-      drivebase.setDefaultCommand(absoluteDriveCommand);
+      drivebase.setDefaultCommand(fieldRelativeAngularVelocityDrive);
 
       driverXbox.x().whileTrue(Commands.runOnce(drivebase::lock, drivebase).repeatedly());
       driverXbox.y().whileTrue(drivebase.driveToDistanceCommand(1.0, 0.2));
@@ -243,8 +243,8 @@ shooterXbox.b().whileTrue(m_superstructure.intakeCommand());
     } else
     {
       driverXbox.a().onTrue((Commands.runOnce(drivebase::zeroGyro)));
-      driverXbox.povUp().onTrue(Commands.runOnce(this::increaseDriveSpeedPreset));
-      driverXbox.povDown().onTrue(Commands.runOnce(this::decreaseDriveSpeedPreset));
+      driverXbox.povUp().onTrue(m_climber.climbUpToTopCommand());
+      driverXbox.povDown().onTrue(m_climber.climbDownToBottomCommand());
       driverXbox.x().onTrue(Commands.runOnce(drivebase::addFakeVisionReading));
       driverXbox.back().onTrue(
           Commands.runOnce(drivebase::printAbsoluteEncoderCalibration).ignoringDisable(true));
@@ -253,20 +253,12 @@ shooterXbox.b().whileTrue(m_superstructure.intakeCommand());
       
     }
 
-    configureLimelightBindings();
+    
       
   }
 
   // right now it's manual but plan to automate it
-  public void configureLimelightBindings()
-  {
-    driverXbox.rightBumper().whileTrue(
-      m_superstructure.limelightAlignCommand(drivebase)
-    );
-    driverXbox.start().whileTrue(
-      m_superstructure.climbBarAlignCommand(drivebase)
-    );
-  }
+  
 
   /**
    * Use this to pass the autonomous command to the main {@link Robot} class.
@@ -304,6 +296,23 @@ shooterXbox.b().whileTrue(m_superstructure.intakeCommand());
         rotateCounterClockwise);
   }
 
+  private Translation2d getDriveTranslation()
+  {
+    double driveScale = DRIVE_SPEED_PRESETS[currentDriveSpeedIndex];
+    double maxLinearSpeed = drivebase.getSwerveDrive().getMaximumChassisVelocity();
+
+    return new Translation2d(
+        -driverXbox.getLeftY() * driveScale * maxLinearSpeed,
+        -driverXbox.getLeftX() * driveScale * maxLinearSpeed);
+  }
+
+  private double getDriveRotation()
+  {
+    double driveScale = DRIVE_SPEED_PRESETS[currentDriveSpeedIndex];
+    double maxAngularSpeed = drivebase.getSwerveDrive().getMaximumChassisAngularVelocity();
+    return -driverXbox.getRightX() * driveScale * maxAngularSpeed;
+  }
+
   private void increaseDriveSpeedPreset()
   {
     currentDriveSpeedIndex = Math.min(currentDriveSpeedIndex + 1, DRIVE_SPEED_PRESETS.length - 1);
@@ -312,5 +321,22 @@ shooterXbox.b().whileTrue(m_superstructure.intakeCommand());
   private void decreaseDriveSpeedPreset()
   {
     currentDriveSpeedIndex = Math.max(currentDriveSpeedIndex - 1, 0);
+  }
+
+  public String getDriveSpeedPresetLabel()
+  {
+    return DRIVE_SPEED_PRESET_LABELS[currentDriveSpeedIndex];
+  }
+
+  public void setDriveSpeedPresetByLabel(String label)
+  {
+    for (int i = 0; i < DRIVE_SPEED_PRESET_LABELS.length; i++)
+    {
+      if (DRIVE_SPEED_PRESET_LABELS[i].equals(label))
+      {
+        currentDriveSpeedIndex = i;
+        return;
+      }
+    }
   }
 }

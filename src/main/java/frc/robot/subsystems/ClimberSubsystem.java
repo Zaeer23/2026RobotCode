@@ -10,6 +10,7 @@ import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.Constants;
 
 public class ClimberSubsystem extends SubsystemBase {
+    private static final double CLIMBER_FULL_TRAVEL_SECONDS = 1.0;
 
     private final SparkMax climberSparkMax = new SparkMax(
         Constants.ClimberConstants.kClimberMotorId, MotorType.kBrushless
@@ -50,5 +51,19 @@ public class ClimberSubsystem extends SubsystemBase {
 
     public Command climbDownCommand() {
         return this.startEnd(this::climbDown, this::stop).withName("ClimbDown");
+    }
+
+    public Command climbUpToTopCommand() {
+        return this.run(this::climbUp)
+            .withTimeout(CLIMBER_FULL_TRAVEL_SECONDS)
+            .finallyDo(() -> stop())
+            .withName("ClimbUpToTop");
+    }
+
+    public Command climbDownToBottomCommand() {
+        return this.run(this::climbDown)
+            .withTimeout(CLIMBER_FULL_TRAVEL_SECONDS)
+            .finallyDo(() -> stop())
+            .withName("ClimbDownToBottom");
     }
 }
