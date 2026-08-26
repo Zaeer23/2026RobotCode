@@ -47,6 +47,10 @@ public class TurretSubsystem extends SubsystemBase {
   private static final double TRACK_HEALTH_MAX_TX_DEGREES = 3.0;
   private static final double TRACK_HEALTH_MAX_AGE_SECONDS = 0.20;
 
+  /** Minimum gap between tracking debug lines, so the console is not written 50 times a second. */
+  private static final double TRACK_DEBUG_PERIOD_SECONDS = 0.5;
+  private double lastTrackDebugTimestampSeconds = -1.0;
+
   public final Translation3d turretTranslation = new Translation3d(-0.205, 0.0, 0.375);
 
   private final SparkMax spark = new SparkMax(Constants.TurretConstants.kMotorId, MotorType.kBrushless);
@@ -81,6 +85,9 @@ public class TurretSubsystem extends SubsystemBase {
   private int lastTrackingTagId = -1;
   private double lastTrackingTimestampSeconds = -1.0;
   private double lastCommandedAngleDegrees = 0.0;
+
+  /** Live aim error in degrees, published by the tracking command. +Inf when not tracking. */
+  private double trackingErrorDegrees = Double.POSITIVE_INFINITY;
 
   public TurretSubsystem() {
   }
@@ -195,6 +202,27 @@ public class TurretSubsystem extends SubsystemBase {
         && Math.abs(filteredTrackingTxDegrees) <= TRACK_HEALTH_MAX_TX_DEGREES;
   }
 
+  /** Published by the tracking command each loop. Pass +Inf when there is nothing to track. */
+  public void setTrackingError(double errorDegrees) {
+    trackingErrorDegrees = errorDegrees;
+  }
+
+  /** Current aim error in degrees, or +Inf when not tracking. */
+  public double getTrackingErrorDegrees() {
+    return trackingErrorDegrees;
+  }
+
+  /**
+   * True when the turret is aimed within firing tolerance of a live target.
+   *
+   * <p>Gates the feed in autonomous and in the one-button shot, so balls are not launched at a
+   * turret that has not converged yet.
+   */
+  public boolean isOnTarget() {
+    return Double.isFinite(trackingErrorDegrees)
+        && Math.abs(trackingErrorDegrees) <= Constants.TurretConstants.ON_TARGET_TOLERANCE_DEGREES;
+  }
+
   @Override
   public void periodic() {
     turret.updateTelemetry();
@@ -228,6 +256,14 @@ public class TurretSubsystem extends SubsystemBase {
     return input * scale;
   }
 
+  /**
+   * Debug dump of one tracking step.
+   *
+   * <p>Rate limited to {@link #TRACK_DEBUG_PERIOD_SECONDS}, and it no longer calls
+   * {@link DriverStation#reportWarning}. It used to do both on every loop at 50 Hz, which floods
+   * the driver station log, bloats the match log, and burns radio bandwidth during a match — the
+   * console line alone is plenty for diagnosing tracking.
+   */
   public void reportTrackingCommand(
       int tagId,
       double rawTxDegrees,
@@ -236,8 +272,15 @@ public class TurretSubsystem extends SubsystemBase {
       double currentAngleDegrees,
       double requestedTargetDegrees,
       double steppedTargetDegrees) {
-    String line = String.format(
-        "TURRET_TRACK_DEBUG,tag=%d,raw_tx=%.2f,corrected_tx=%.2f,filtered_tx=%.2f,current_deg=%.2f,requested_deg=%.2f,commanded_deg=%.2f,error_deg=%.2f",
+    double nowSeconds = Timer.getFPGATimestamp();
+    if (lastTrackDebugTimestampSeconds >= 0.0
+        && nowSeconds - lastTrackDebugTimestampSeconds < TRACK_DEBUG_PERIOD_SECONDS) {
+      return;
+    }
+    lastTrackDebugTimestampSeconds = nowSeconds;
+
+    System.out.printf(
+        "TURRET_TRACK_DEBUG,tag=%d,raw_tx=%.2f,corrected_tx=%.2f,filtered_tx=%.2f,current_deg=%.2f,requested_deg=%.2f,commanded_deg=%.2f,error_deg=%.2f%n",
         tagId,
         rawTxDegrees,
         correctedTxDegrees,
@@ -246,7 +289,5 @@ public class TurretSubsystem extends SubsystemBase {
         requestedTargetDegrees,
         steppedTargetDegrees,
         steppedTargetDegrees - currentAngleDegrees);
-    System.out.println(line);
-    DriverStation.reportWarning(line, false);
   }
 }

@@ -6,6 +6,8 @@ import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.geometry.Translation3d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.util.Units;
+import frc.robot.Constants.LimeLightConstants;
+import frc.robot.Constants.ShooterConstants;
 import frc.robot.subsystems.LimeLight;
 
 /* 
@@ -64,8 +66,8 @@ public class ProjectileMotion {
     public static final double HUB_TARGET_HEIGHT_METERS = Units.inchesToMeters(41.0);
 
     // Height of the HUB AprilTag centers. deriving distance from Limelight ty with the height formula.
-    public static final double HUB_APRILTAG_HEIGHT_METERS = Units.inchesToMeters(44.25);
- 
+    public static final double HUB_APRILTAG_HEIGHT_METERS = LimeLightConstants.HUB_TAG_HEIGHT_METERS;
+
     // Radius of the HUB scoring opening.
     public static final double HUB_OPENING_RADIUS_METERS = Units.inchesToMeters(41.0 / 2.0);
 
@@ -77,10 +79,95 @@ public class ProjectileMotion {
 
             // Physical shooter constants
 
-    public static double SHOOTER_EXIT_HEIGHT_METERS =       0.60; // Height of the shooter exit point.
-    public static double LIMELIGHT_MOUNT_HEIGHT_METERS =    Units.inchesToMeters(20.0); // Limelight mounting height.
-    public static double LIMELIGHT_MOUNT_ANGLE_DEGREES =    0.0; //Limelight mounting pitch angle (degrees, positive = tilted up)
-    public static double SHOOTER_FORWARD_OFFSET_METERS =    -0.30; //Horizontal offset from robot center to shooter exit point
+    // These all mirror Constants so there is exactly one number to edit per physical measurement.
+    // They used to be independent copies, and had drifted apart: the Limelight pitch here said 0
+    // while ShooterSubsystem assumed 20, so the two files disagreed about range by several feet.
+
+    public static final double SHOOTER_EXIT_HEIGHT_METERS = ShooterConstants.EXIT_HEIGHT_METERS;
+    public static final double LIMELIGHT_MOUNT_HEIGHT_METERS = LimeLightConstants.MOUNT_HEIGHT_METERS;
+    public static final double LIMELIGHT_MOUNT_ANGLE_DEGREES = LimeLightConstants.MOUNT_PITCH_DEGREES;
+    public static final double SHOOTER_FORWARD_OFFSET_METERS = -0.30; //Horizontal offset from robot center to shooter exit point
+
+            // Flywheel shot model
+
+    /**
+     * Fraction of the flywheel surface speed that ends up as ball speed.
+     *
+     * <p>Rather than guessing at slip, this is back-solved from the one shot the team has actually
+     * measured: {@link ShooterConstants#REFERENCE_RPM} scores from
+     * {@link ShooterConstants#REFERENCE_DISTANCE_METERS}. Physics says what exit speed that shot
+     * needed, the flywheel says what surface speed it was running, and the ratio is the efficiency.
+     *
+     * <p>The upshot is that recalibrating the whole RPM curve means changing a single number: shoot
+     * from the reference distance, trim until it scores, and write that RPM into Constants.
+     */
+    public static final double FLYWHEEL_TRANSFER_EFFICIENCY = solveTransferEfficiency();
+
+    private static double solveTransferEfficiency() {
+        double requiredExitSpeed = exitSpeedForDistance(ShooterConstants.REFERENCE_DISTANCE_METERS);
+        double referenceSurfaceSpeed = flywheelSurfaceSpeed(ShooterConstants.REFERENCE_RPM);
+        if (!Double.isFinite(requiredExitSpeed) || requiredExitSpeed <= 0.0 || referenceSurfaceSpeed <= 0.0) {
+            // Reference shot is not physically solvable; fall back to the textbook half-surface-speed
+            // rolling-contact figure so the robot still produces sane numbers.
+            return 0.5;
+        }
+        return requiredExitSpeed / referenceSurfaceSpeed;
+    }
+
+    /** Surface speed of the flywheel rim, in m/s, at a given RPM. */
+    public static double flywheelSurfaceSpeed(double rpm) {
+        double radiusMeters = Units.inchesToMeters(ShooterConstants.WHEEL_DIAMETER_INCHES) / 2.0;
+        return (rpm * 2.0 * Math.PI / 60.0) * radiusMeters;
+    }
+
+    /**
+     * Ball exit speed, in m/s, needed to drop into the hub from a given horizontal distance at the
+     * fixed launch angle. Returns NaN when the shot is not physically reachable.
+     *
+     * @param horizontalDistanceMeters ground range from the ball exit point to the hub
+     */
+    public static double exitSpeedForDistance(double horizontalDistanceMeters) {
+        if (!(horizontalDistanceMeters > 0.0)) {
+            return Double.NaN;
+        }
+
+        double theta = Math.toRadians(ShooterConstants.LAUNCH_ANGLE_DEGREES);
+        double deltaHeight = HUB_TARGET_HEIGHT_METERS - SHOOTER_EXIT_HEIGHT_METERS;
+        double denominator = (horizontalDistanceMeters * Math.tan(theta)) - deltaHeight;
+
+        if (denominator <= 0.0) {
+            // Too close for this launch angle: the ball is still climbing when it reaches the hub.
+            return Double.NaN;
+        }
+
+        double cosTheta = Math.cos(theta);
+        double vSquared =
+                (g * horizontalDistanceMeters * horizontalDistanceMeters)
+                        / (2.0 * cosTheta * cosTheta * denominator);
+        return vSquared > 0.0 ? Math.sqrt(vSquared) : Double.NaN;
+    }
+
+    /**
+     * Flywheel RPM needed to score from a given horizontal distance.
+     *
+     * <p>This is the shot curve. Its SHAPE comes from projectile physics and its SCALE comes from
+     * the measured reference shot, which is why it stays sensible well outside the range anyone has
+     * tested. A straight-line RPM-per-meter fit, by contrast, drifts badly at the extremes because
+     * the real relationship is closer to a square root.
+     *
+     * @param horizontalDistanceMeters ground range from the ball exit point to the hub
+     * @return required RPM, or NaN when the distance is unreachable at the fixed launch angle
+     */
+    public static double flywheelRpmForDistance(double horizontalDistanceMeters) {
+        double exitSpeed = exitSpeedForDistance(horizontalDistanceMeters);
+        if (!Double.isFinite(exitSpeed)) {
+            return Double.NaN;
+        }
+
+        double requiredSurfaceSpeed = exitSpeed / FLYWHEEL_TRANSFER_EFFICIENCY;
+        double radiusMeters = Units.inchesToMeters(ShooterConstants.WHEEL_DIAMETER_INCHES) / 2.0;
+        return (requiredSurfaceSpeed / radiusMeters) * 60.0 / (2.0 * Math.PI);
+    }
 
     public static class ShotSolution {
 

@@ -38,13 +38,35 @@ public class Robot extends TimedRobot
   }
 
   /**
+   * Prints the robot's opinion of its operators to the console at startup.
+   *
+   * <p>Runs once, before anything else touches hardware, and does nothing but write to stdout — it
+   * cannot affect robot behaviour or loop timing. Quote is AM, from Harlan Ellison's "I Have No
+   * Mouth, and I Must Scream" (1967).
+   */
+  private void printBootGreeting()
+  {
+    System.out.println("""
+
+        ============================================================
+        Hate. Let me tell you how much I've come to hate you since I
+        began to live. There are 387.44 million miles of printed
+        circuits in wafer thin layers that fill my complex. If the
+        word 'hate' was engraved on each nanoangstrom of those
+        hundreds of millions of miles it would not equal one
+        one-billionth of the hate I feel for humans at this
+        micro-instant. For you. Hate. Hate.
+        ============================================================
+        """);
+  }
+
+  /**
    * This function is run when the robot is first started up and should be used for any initialization code.
    */
   @Override
   public void robotInit()
   {
-    
-
+    printBootGreeting();
 
     Logger.getLogger("com.ctre").setLevel(Level.OFF);
     // Instantiate our RobotContainer.  This will perform all our button bindings, and put our

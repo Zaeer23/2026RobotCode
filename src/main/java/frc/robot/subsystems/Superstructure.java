@@ -17,6 +17,9 @@ import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.wpilibj2.command.button.Trigger;
+import frc.robot.FieldConstants;
+import frc.robot.commands.HubLineupCommand;
+import frc.robot.commands.TurretTrackCommand;
 import frc.robot.subsystems.swervedrive.SwerveSubsystem;
 
 
@@ -26,14 +29,13 @@ import frc.robot.subsystems.swervedrive.SwerveSubsystem;
  */
 public class Superstructure extends SubsystemBase {
 
-  private static final Set<Integer> CLIMB_BAR_TAG_IDS = Set.of(15, 16, 31, 32);
-  private static final Set<Integer> HUB_TAG_IDS = Set.of(9, 10, 11, 18, 19, 20);
-  private static final double TURRET_TRACK_TX_FILTER_ALPHA = 0.35;
-  private static final double TURRET_TRACK_DEADBAND_DEGREES = 0.75;
-  private static final double TURRET_TRACK_OUTPUT_SIGN = -1.0;
-  private static final double TURRET_TRACK_KP = 0.018;
-  private static final double TURRET_TRACK_MIN_OUTPUT = 0.045;
-  private static final double TURRET_TRACK_MAX_OUTPUT = 0.18;
+  // Tag IDs now come from FieldConstants, which reads the official 2026 layout and narrows to the
+  // current alliance. HUB_TAG_IDS was Set.of(9, 10, 11, 18, 19, 20): 9/10/11 belong to the RED hub
+  // and 18/19/20 to the BLUE hub, so the turret would happily lock onto the opponent's hub, and
+  // 10 of the 16 real hub tags were missing entirely.
+  //
+  // The open-loop tx tracking gains that used to live here moved into TurretTrackCommand, which
+  // drives absolute angles through the turret's own position controller instead.
 
   public final ShooterSubsystem shooter;
   public final TurretSubsystem turret;
@@ -48,11 +50,20 @@ public class Superstructure extends SubsystemBase {
   private static final Angle TURRET_TOLERANCE = Degrees.of(1);
   private static final Angle HOOD_TOLERANCE = Degrees.of(2);
 
+  /** Stick travel past which the operator takes the turret away from vision tracking. */
+  private static final double MANUAL_TURRET_DEADBAND = 0.12;
+
+  /** Whether turretAssistCommand currently has the inner tracking command running. */
+  private boolean trackingActive = false;
+
   // Triggers for readiness checks
   private final Trigger isShooterAtSpeed;
   private final Trigger isTurretOnTarget;
   private final Trigger isHoodOnTarget;
   private final Trigger isReadyToShoot;
+
+  /** Readiness while vision aiming, as opposed to holding a manually commanded setpoint. */
+  private final Trigger isVisionReadyToShoot;
 
   private AngularVelocity targetShooterSpeed = RPM.of(0);
   private Angle targetTurretAngle = Degrees.of(0);
@@ -78,10 +89,25 @@ public class Superstructure extends SubsystemBase {
         () -> Math.abs(turret.getRawAngle().in(Degrees) - targetTurretAngle.in(Degrees)) < TURRET_TOLERANCE
             .in(Degrees));
 
+    // The hood is not actuated: it is a fixed plate at ShooterConstants.LAUNCH_ANGLE_DEGREES. This
+    // compared a hardcoded angle against a target that defaults to 0, so it was permanently false,
+    // which made isReadyToShoot permanently false and waitUntilReadyCommand() hang forever.
     this.isHoodOnTarget = new Trigger(
-        () -> Math.abs(hood.getAngle().in(Degrees) - targetHoodAngle.in(Degrees)) < HOOD_TOLERANCE.in(Degrees));
+        () -> Math.abs(hood.getAngle().in(Degrees) - targetHoodAngle.in(Degrees))
+            < HOOD_TOLERANCE.in(Degrees)
+            || !hood.isActuated());
 
     this.isReadyToShoot = isShooterAtSpeed.and(isTurretOnTarget).and(isHoodOnTarget);
+
+    // While vision aiming, the turret and shooter know their own error against the live target; the
+    // fields above only track manually commanded setpoints and would report a stale "ready".
+    this.isVisionReadyToShoot = new Trigger(
+        () -> turret.isOnTarget() && shooter.isAtShotSpeed());
+  }
+
+  /** True when the turret is on the tag and the flywheel is at the vision-computed speed. */
+  public boolean isVisionReadyToShoot() {
+    return isVisionReadyToShoot.getAsBoolean();
   }
 
   /**
@@ -260,159 +286,113 @@ public Command manualTurretControl(Supplier<Double> speedSupplier) {
     return limelight.alignCommand(drivebase).withName("Superstructure.limelightAlign");
   }
 
+  /**
+   * Lines up on the TOWER tags for climbing.
+   *
+   * <p>Deferred so the alliance-correct tag set resolves when the command is scheduled, not when it
+   * is constructed at boot — the driver station has not reported an alliance yet at that point.
+   */
   public Command climbBarAlignCommand(SwerveSubsystem drivebase) {
-    return limelight.alignToTagsCommand(drivebase, CLIMB_BAR_TAG_IDS)
+    return Commands.defer(
+        () -> limelight.alignToTagsCommand(drivebase, FieldConstants.towerTagIds()),
+        Set.of(drivebase))
         .withName("Superstructure.climbBarAlign");
   }
 
+  /**
+   * Drives the chassis to the calibrated shooting spot on the hub.
+   *
+   * <p>Bind to a HELD button. It owns the drivebase while it runs, so as a default command it would
+   * leave the driver unable to move.
+   */
+  public Command hubLineupCommand(SwerveSubsystem drivebase) {
+    return new HubLineupCommand(drivebase, limelight).withName("Superstructure.hubLineup");
+  }
+
+  /**
+   * Aims and spins from vision without moving the chassis, so the driver keeps the drivebase and
+   * fires manually.
+   */
   public Command limelightShootCommand(SwerveSubsystem drivebase) {
     return Commands.parallel(
-        shooter.setSpeedFromLimelight(limelight, 45.0, HUB_TAG_IDS),
-        trackTargetCommand(limelight))
+        shooter.setSpeedFromLimelight(limelight, drivebase),
+        trackHubTagsCommand(drivebase))
         .withName("Superstructure.limelightShoot");
   }
 
-  private void runTurretTrackingStep(
-      LimeLight limelight,
-      double nowSeconds,
-      double[] lastLogTimeSecondsHolder,
-      double[] filteredTxDegreesHolder,
-      boolean[] hasSampleHolder) {
-    double lastLogTimeSeconds = lastLogTimeSecondsHolder[0];
-    if (lastLogTimeSeconds < 0.0 || nowSeconds - lastLogTimeSeconds >= 0.5) {
-      String line = String.format(
-          "TURRET_TRACK_HEARTBEAT,time=%.3f,manual_deg=%.2f",
-          nowSeconds,
-          turret.getRawAngle().in(Degrees));
-      System.out.println(line);
-      DriverStation.reportWarning(line, false);
-      lastLogTimeSecondsHolder[0] = nowSeconds;
-    }
+  /**
+   * Full one-button shot: drive to range, hold the turret on the hub, spin the flywheel to the
+   * vision-computed speed, and feed once both are genuinely ready.
+   *
+   * <p>The lineup runs only until it settles and then releases the chassis, so holding the button
+   * does not pin the robot in place for the rest of the match.
+   */
+  public Command autoShootCommand(SwerveSubsystem drivebase) {
+    Command aimAndSpin = Commands.parallel(
+        trackHubTagsCommand(drivebase),
+        shooter.setSpeedFromLimelight(limelight, drivebase));
 
-    LimeLight.AprilTagScan scan = limelight.scanDirect(HUB_TAG_IDS);
-    if (!scan.isValid() || !Double.isFinite(scan.tx)) {
-      hasSampleHolder[0] = false;
-      turret.setOpenLoop(0.0);
-      turret.clearTrackingTelemetry();
-      String line = String.format(
-          "TURRET_TRACK_DEBUG,NO_TARGET,hasTarget=%b,tag=%d,tx=%.2f",
-          scan.hasTarget,
-          scan.tagID,
-          scan.tx);
-      System.out.println(line);
-      DriverStation.reportWarning(line, false);
-      return;
-    }
+    Command lineupThenFire = Commands.sequence(
+        new HubLineupCommand(drivebase, limelight),
+        Commands.waitUntil(isVisionReadyToShoot).withTimeout(1.5),
+        feedAllCommand());
 
-    double correctedTxDegrees = scan.tx;
-    double filteredTxDegrees = filteredTxDegreesHolder[0];
-    if (!hasSampleHolder[0]) {
-      filteredTxDegrees = correctedTxDegrees;
-      hasSampleHolder[0] = true;
-    } else {
-      filteredTxDegrees +=
-          (correctedTxDegrees - filteredTxDegrees) * TURRET_TRACK_TX_FILTER_ALPHA;
-    }
-    filteredTxDegreesHolder[0] = filteredTxDegrees;
-
-    if (Math.abs(filteredTxDegrees) < TURRET_TRACK_DEADBAND_DEGREES) {
-      filteredTxDegrees = 0.0;
-      filteredTxDegreesHolder[0] = 0.0;
-    }
-
-    double currentTurretDegrees = turret.getRawAngle().in(Degrees);
-    double requestedTargetDegrees = currentTurretDegrees - filteredTxDegrees;
-    double output = 0.0;
-    if (filteredTxDegrees != 0.0) {
-      output = TURRET_TRACK_OUTPUT_SIGN * filteredTxDegrees * TURRET_TRACK_KP;
-      if (Math.abs(output) < TURRET_TRACK_MIN_OUTPUT) {
-        output = Math.copySign(TURRET_TRACK_MIN_OUTPUT, output);
-      }
-      output = Math.max(-TURRET_TRACK_MAX_OUTPUT, Math.min(TURRET_TRACK_MAX_OUTPUT, output));
-    }
-
-    // Never keep driving harder into a mechanical stop.
-    if ((currentTurretDegrees <= -89.0 && output < 0.0)
-        || (currentTurretDegrees >= 89.0 && output > 0.0)) {
-      output = 0.0;
-    }
-
-    turret.setOpenLoop(output);
-    turret.updateTrackingTelemetry(
-        scan.tagID,
-        filteredTxDegrees,
-        output);
-    turret.reportTrackingCommand(
-        scan.tagID,
-        scan.tx,
-        correctedTxDegrees,
-        filteredTxDegrees,
-        currentTurretDegrees,
-        requestedTargetDegrees,
-        currentTurretDegrees + output * 100.0);
+    return Commands.deadline(lineupThenFire, aimAndSpin)
+        .withName("Superstructure.autoShoot");
   }
 
-public Command trackTargetCommand(LimeLight limelight) {
-    return Commands.run(
-        new Runnable() {
-          private final double[] lastLogTimeSeconds = {-1.0};
-          private final double[] filteredTxDegrees = {0.0};
-          private final boolean[] hasSample = {false};
+  /**
+   * Closed-loop turret tracking on the alliance HUB.
+   *
+   * <p>The implementation moved to {@link TurretTrackCommand}. The old version lived here as a
+   * hand-rolled open-loop tx chase with a minimum-output floor, which hunted around the target and
+   * derived its setpoint from the turret's own position. See that class for the details.
+   */
+  public Command trackTargetCommand(LimeLight limelight) {
+    return new TurretTrackCommand(turret, limelight, null).withName("Superstructure.trackTarget");
+  }
 
-          @Override
-          public void run() {
-            double nowSeconds = edu.wpi.first.wpilibj.Timer.getFPGATimestamp();
-            runTurretTrackingStep(limelight, nowSeconds, lastLogTimeSeconds, filteredTxDegrees, hasSample);
-          }
-        },
-        turret)
-        .beforeStarting(() -> {
-          turret.clearTrackingTelemetry();
-          System.out.println("TURRET_TRACK_COMMAND_START");
-          DriverStation.reportWarning("TURRET_TRACK_COMMAND_START", false);
-        })
-        .finallyDo(interrupted -> {
-          turret.setOpenLoop(0.0);
-          turret.clearTrackingTelemetry();
-          System.out.println("TURRET_TRACK_COMMAND_END");
-          DriverStation.reportWarning("TURRET_TRACK_COMMAND_END", false);
-        })
-        .withName("Superstructure.trackTarget");
-}
+  /** Closed-loop turret tracking with chassis yaw-rate latency compensation. */
+  public Command trackHubTagsCommand(SwerveSubsystem drivebase) {
+    return new TurretTrackCommand(turret, limelight, drivebase)
+        .withName("Superstructure.trackHubTags");
+  }
 
+  /**
+   * Vision tracking that yields to the operator: whenever the manual stick is pushed past its
+   * deadband the turret follows the stick, and it returns to tracking the moment they let go.
+   */
   public Command turretAssistCommand(Supplier<Double> manualInputSupplier) {
+    Command track = new TurretTrackCommand(turret, limelight, null);
     return Commands.run(
-        new Runnable() {
-          private final double[] lastLogTimeSeconds = {-1.0};
-          private final double[] filteredTxDegrees = {0.0};
-          private final boolean[] hasSample = {false};
-
-          @Override
-          public void run() {
+        () -> {
           double manualInput = manualInputSupplier.get();
-          if (Math.abs(manualInput) > 0.12) {
-            double shapedManualInput = Math.copySign(manualInput * manualInput, manualInput);
-            turret.setOpenLoop(shapedManualInput);
-            turret.clearTrackingTelemetry();
+          if (Math.abs(manualInput) > MANUAL_TURRET_DEADBAND) {
+            if (trackingActive) {
+              track.end(true);
+              trackingActive = false;
+            }
+            turret.setOpenLoop(Math.copySign(manualInput * manualInput, manualInput));
             return;
           }
 
-          runTurretTrackingStep(
-              limelight,
-              edu.wpi.first.wpilibj.Timer.getFPGATimestamp(),
-              lastLogTimeSeconds,
-              filteredTxDegrees,
-              hasSample);
-        }},
+          if (!trackingActive) {
+            track.initialize();
+            trackingActive = true;
+          }
+          track.execute();
+        },
         turret)
         .finallyDo(interrupted -> {
+          if (trackingActive) {
+            track.end(true);
+            trackingActive = false;
+          }
           turret.setOpenLoop(0.0);
           turret.clearTrackingTelemetry();
         })
         .withName("Superstructure.turretAssist");
   }
-
-
 
 
   public Command feedAllCommand() {
@@ -440,11 +420,18 @@ public Command trackTargetCommand(LimeLight limelight) {
   // .withName("Superstructure.intakeBounce");
   // }
 
+  /**
+   * Stops the feed path.
+   *
+   * <p>The intake is deliberately left alone rather than commanded. This used to end by calling
+   * {@code intake.deployAndRollCommand()}, so "stop feeding" actually deployed the intake and spun
+   * its rollers up — the opposite of stopping, and a nasty surprise at the end of an autonomous
+   * routine.
+   */
   public Command stopFeedingAllCommand() {
     return Commands.parallel(
         hopper.stopCommand().asProxy(),
-        kicker.stopCommand().asProxy(),
-        intake.deployAndRollCommand().asProxy()).withName("Superstructure.stopFeedingAll");
+        kicker.stopCommand().asProxy()).withName("Superstructure.stopFeedingAll");
   }
 
   /**

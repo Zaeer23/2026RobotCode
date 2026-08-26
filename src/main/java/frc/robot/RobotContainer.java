@@ -21,6 +21,10 @@ import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import edu.wpi.first.wpilibj2.command.button.Trigger;
 import frc.robot.Constants.OperatorConstants;
+import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
+import frc.robot.commands.AutoRoutines;
+import frc.robot.commands.HubLineupCommand;
 import frc.robot.commands.LimeLightRunner;
 import frc.robot.commands.ShootingCommand;
 import frc.robot.subsystems.HopperSubsystem;
@@ -127,6 +131,8 @@ private final ShuffleboardManager m_shuffleboard = new ShuffleboardManager(
     m_limelight, m_superstructure, drivebase, m_turret, m_driverCamera
 );
 
+  private final SendableChooser<Command> autoChooser = new SendableChooser<>();
+
   public RobotContainer()
   {
     // Configure the trigger bindings
@@ -135,14 +141,40 @@ private final ShuffleboardManager m_shuffleboard = new ShuffleboardManager(
 
     configureSubSystemKeys();
     configureLimeLightKeys();
+    configureAutoChooser();
+  }
+
+  private void configureAutoChooser()
+  {
+    autoChooser.setDefaultOption(
+        "Shoot + Collect + Shoot",
+        AutoRoutines.shootCollectShoot(m_superstructure, m_turret, m_shooter, m_limelight, drivebase));
+    autoChooser.addOption(
+        "Shoot preload + leave",
+        AutoRoutines.shootAndLeave(m_superstructure, m_turret, m_shooter, m_limelight, drivebase));
+    autoChooser.addOption(
+        "Shoot preload only",
+        AutoRoutines.shootPreloadOnly(m_superstructure, m_turret, m_shooter, m_limelight, drivebase));
+    autoChooser.addOption(
+        "Blind timed shoot (no vision)",
+        new ShootingCommand(m_shooter, m_kicker, m_hopper));
+    autoChooser.addOption("Do nothing", Commands.none());
+    SmartDashboard.putData("Auto Routine", autoChooser);
   }
 
   public void configureSubSystemKeys()
   {
     new Trigger(() -> isCurrentShooterProfile() && shooterXbox.a().getAsBoolean())
         .whileTrue(m_superstructure.feedAllCommand());
+    // Vision aim + spin: turret holds the hub and the flywheel goes to the range-computed RPM.
+    // The chassis is untouched, so the driver keeps driving. (Was a Commands.none() placeholder.)
     new Trigger(() -> isCurrentShooterProfile() && shooterXbox.y().getAsBoolean())
-        .whileTrue(Commands.none());
+        .whileTrue(m_superstructure.limelightShootCommand(drivebase));
+
+    // Full auto shot: line up, aim, spin, and feed once both are genuinely ready. Borrows the
+    // drivebase only until the lineup settles, then releases it back to the driver.
+    new Trigger(() -> isCurrentShooterProfile() && shooterXbox.leftBumper().getAsBoolean())
+        .whileTrue(m_superstructure.autoShootCommand(drivebase));
     driverXbox.y().whileTrue(m_limelight.alignCommand(drivebase));
     new Trigger(() -> isCurrentShooterProfile() && shooterXbox.povLeft().getAsBoolean())
         .onTrue(m_shooter.decreaseLimelightPowerForLastShotCommand());
@@ -200,10 +232,27 @@ m_intake.setDefaultCommand(
 
     }
   
+  /**
+   * Vision-assisted drivebase moves.
+   *
+   * <p>Both are {@code whileTrue} on a HELD button, and neither is a default command. The drivebase
+   * default stays plain driver control, so releasing the button always hands the robot straight
+   * back to the driver — and the lineup ends by itself once it settles.
+   *
+   * <p>This method previously constructed a {@link LimeLightRunner} and called {@code execute()} on
+   * it directly, exactly once, at startup. A Command has to be scheduled to run: calling execute()
+   * by hand fires a single loop iteration during init, ignores the drivebase requirement it
+   * declared, and then never runs again. {@link HubLineupCommand} supersedes it.
+   */
   public void configureLimeLightKeys()
   {
-    LimeLightRunner runner = new LimeLightRunner(m_limelight, drivebase, () -> driverXbox.getLeftY());
-    runner.execute();
+    m_limelight.configureForAprilTags();
+
+    // Auto line up on the hub: squares up and drives to the calibrated shooting range.
+    driverXbox.rightBumper().whileTrue(m_superstructure.hubLineupCommand(drivebase));
+
+    // Line up on the TOWER tags for the climb.
+    driverXbox.start().whileTrue(m_superstructure.climbBarAlignCommand(drivebase));
   }
 
   /**
@@ -301,7 +350,7 @@ m_intake.setDefaultCommand(
    */
   public Command getAutonomousCommand()
   {
-    return new ShootingCommand(m_shooter, m_kicker, m_hopper);
+    return autoChooser.getSelected();
   }
 
   public void setMotorBrake(boolean brake)

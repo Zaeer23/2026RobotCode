@@ -31,7 +31,10 @@ import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.wpilibj2.command.WaitCommand;
-import frc.robot.Constants;
+import frc.robot.FieldConstants;
+import frc.robot.Constants.ShooterConstants;
+import frc.robot.subsystems.VisionTargeting.TargetObservation;
+import frc.robot.subsystems.swervedrive.SwerveSubsystem;
 import yams.gearing.GearBox;
 import yams.gearing.MechanismGearing;
 import yams.mechanisms.config.FlyWheelConfig;
@@ -42,21 +45,26 @@ import yams.motorcontrollers.SmartMotorControllerConfig.ControlMode;
 import yams.motorcontrollers.SmartMotorControllerConfig.MotorMode;
 import yams.motorcontrollers.SmartMotorControllerConfig.TelemetryVerbosity;
 import yams.motorcontrollers.local.SparkWrapper;
-import frc.robot.subsystems.LimeLight;
 
+/**
+ * Shooter flywheel and the vision-driven shot power model.
+ *
+ * <h2>How shot power is chosen</h2>
+ *
+ * <ol>
+ *   <li>{@link VisionTargeting} gives the range from the ball exit point to the hub.
+ *   <li>{@link ProjectileMotion#flywheelRpmForDistance} turns that into an RPM using projectile
+ *       physics scaled by one efficiency factor derived from the team's measured reference shot.
+ *   <li>Any per-distance trim the drivers have dialled in is added.
+ *   <li>If drivers have confirmed real scoring shots at that range, the learned table wins over the
+ *       model entirely.
+ * </ol>
+ *
+ * <p>The model exists so the untuned baseline is sensible everywhere; the table exists because the
+ * real robot always disagrees with physics somewhere. Neither one alone was enough.
+ */
 public class ShooterSubsystem extends SubsystemBase {
-  private static final double SHOOTER_MAX_RPM = 5600.0;
   private static final double SHOOTER_SPINUP_RPM = 3600.0;
-  private static final double LIMELIGHT_SHOT_MIN_RPM = 3200.0;
-  private static final double LIMELIGHT_SHOT_MAX_RPM = 4800.0;
-  private static final double LIMELIGHT_REFERENCE_DISTANCE_METERS = 3.5052; // 11 ft 6 in
-  private static final double LIMELIGHT_REFERENCE_RPM = 3300.0;
-  private static final double LIMELIGHT_RPM_PER_METER = 450.0;
-  private static final double LIMELIGHT_RPM_TRIM = -100.0;
-  private static final double LIMELIGHT_RPM_SCALE = 0.90;
-  private static final double SHOOTING_LIMELIGHT_MOUNT_ANGLE_DEGREES = 20.0; // tune to your real mount
-  private static final double LIMELIGHT_MIN_VALID_DISTANCE_METERS = 0.8;
-  private static final double LIMELIGHT_MAX_VALID_DISTANCE_METERS = 8.0;
   private static final double INVALID_TARGET_WARNING_PERIOD_SECONDS = 5.0;
   private static final double LIMELIGHT_FEEDBACK_STEP_RPM = 75.0;
   private static final double FEEDBACK_WINDOW_SECONDS = 10.0;
@@ -65,10 +73,10 @@ public class ShooterSubsystem extends SubsystemBase {
   private static final double DEFAULT_RANGE_HALF_WIDTH_RPM = 175.0;
   private static final int MIN_BUCKETS_FOR_MARKDOWN_TABLE = 3;
 
-  private final SparkMax leaderSpark = new SparkMax(Constants.ShooterConstants.kLeaderMotorId,
+  private final SparkMax leaderSpark = new SparkMax(ShooterConstants.kLeaderMotorId,
       MotorType.kBrushless);
 
-  private final SparkMax followerSpark = new SparkMax(Constants.ShooterConstants.kFollowerMotorId,
+  private final SparkMax followerSpark = new SparkMax(ShooterConstants.kFollowerMotorId,
       MotorType.kBrushless);
 
   private final SmartMotorControllerConfig smcConfig = new SmartMotorControllerConfig(this)
@@ -87,9 +95,9 @@ public class ShooterSubsystem extends SubsystemBase {
   private final SmartMotorController smc = new SparkWrapper(leaderSpark, DCMotor.getNEO(2), smcConfig);
 
   private final FlyWheelConfig shooterConfig = new FlyWheelConfig(smc)
-      .withDiameter(Inches.of(4))
+      .withDiameter(Inches.of(ShooterConstants.WHEEL_DIAMETER_INCHES))
       .withMass(Pounds.of(1))
-      .withUpperSoftLimit(RPM.of(SHOOTER_MAX_RPM))
+      .withUpperSoftLimit(RPM.of(ShooterConstants.MAX_MECHANICAL_RPM))
       .withLowerSoftLimit(RPM.of(0))
       .withTelemetry("Shooter", TelemetryVerbosity.HIGH);
 
@@ -115,11 +123,13 @@ public class ShooterSubsystem extends SubsystemBase {
   private double shooterAttemptLastEquationRpm = 0.0;
   private double shooterAttemptLastCommandedRpm = 0.0;
   private double shooterAttemptLastActualRpm = 0.0;
-  private double shooterAttemptLastTxDegrees = 0.0;
-  private double shooterAttemptLastTyDegrees = 0.0;
-  private double shooterAttemptLastLaunchAngleDegrees = 0.0;
+  private double shooterAttemptLastBearingDegrees = 0.0;
+  private double shooterAttemptLastTurretAngleDegrees = 0.0;
   private double pendingFeedbackDistanceMeters = 0.0;
   private double pendingFeedbackCommandedRpm = 0.0;
+
+  /** Setpoint the vision shot model last asked for, so readiness checks have something to compare. */
+  private double commandedShotRpm = 0.0;
 
   public ShooterSubsystem() {
     loadPersistentDistanceTrims();
@@ -137,25 +147,25 @@ public class ShooterSubsystem extends SubsystemBase {
   public Command setPercent(Supplier<Double> percentSupplier) {
     return run(() -> leaderSpark.set(percentSupplier.get()))
         .finallyDo(() -> leaderSpark.set(0)); // stops motor on release
-}
-public Command waitCommand() {
+  }
+
+  public Command waitCommand() {
     return new WaitCommand(2.0);
-}
+  }
 
-
-public Command setPercentAsRPM(Supplier<Double> percentSupplier) {
+  public Command setPercentAsRPM(Supplier<Double> percentSupplier) {
     return shooter.setSpeed(
-        () -> RPM.of(percentSupplier.get() * SHOOTER_MAX_RPM)
-    ).finallyDo(() -> leaderSpark.set(0));
-}
+        () -> RPM.of(percentSupplier.get() * ShooterConstants.MAX_MECHANICAL_RPM))
+        .finallyDo(() -> leaderSpark.set(0));
+  }
+
   public Command spinUp() {
-    return setSpeed(RPM.of(3200));
+    return setSpeed(RPM.of(SHOOTER_SPINUP_RPM));
   }
 
   public Command stop() {
     return setSpeed(RPM.of(0));
   }
-  
 
   public AngularVelocity getSpeed() {
     return shooter.getSpeed();
@@ -164,96 +174,121 @@ public Command setPercentAsRPM(Supplier<Double> percentSupplier) {
   public Command sysId() {
     return shooter.sysId(Volts.of(12), Volts.of(3).per(Second), Seconds.of(7));
   }
-  
-  public Command setSpeedFromLimelight(LimeLight limelight, double fixedLaunchAngleDegrees) {
-    return setSpeedFromLimelight(limelight, fixedLaunchAngleDegrees, null);
+
+  /** RPM the vision shot model is currently asking for. Zero when it is not running. */
+  public double getCommandedShotRpm() {
+    return commandedShotRpm;
+  }
+
+  /** True when the flywheel has reached whatever the vision shot model last asked for. */
+  public boolean isAtShotSpeed() {
+    return commandedShotRpm > 0.0
+        && Math.abs(getSpeed().in(RPM) - commandedShotRpm) <= ShooterConstants.READY_TOLERANCE_RPM;
+  }
+
+  public Command setSpeedFromLimelight(LimeLight limelight) {
+    return setSpeedFromLimelight(limelight, null, FieldConstants::hubTagIds);
+  }
+
+  public Command setSpeedFromLimelight(LimeLight limelight, SwerveSubsystem drivebase) {
+    return setSpeedFromLimelight(limelight, drivebase, FieldConstants::hubTagIds);
   }
 
   public Command setSpeedFromLimelight(
+      LimeLight limelight, SwerveSubsystem drivebase, Set<Integer> allowedTagIds) {
+    return setSpeedFromLimelight(limelight, drivebase, () -> allowedTagIds);
+  }
+
+  /**
+   * Continuously commands the flywheel to whatever speed the current vision range calls for.
+   *
+   * @param limelight     camera to range off
+   * @param drivebase     used for latency compensation; may be null
+   * @param allowedTagIds supplier of the tags to accept, evaluated each cycle so the alliance can
+   *                      arrive after the command was constructed
+   */
+  public Command setSpeedFromLimelight(
       LimeLight limelight,
-      double fixedLaunchAngleDegrees,
-      Set<Integer> allowedTagIds) {
+      SwerveSubsystem drivebase,
+      Supplier<Set<Integer>> allowedTagIds) {
     return shooter.setSpeed(() -> {
-        double nowSeconds = Timer.getFPGATimestamp();
-        LimeLight.AprilTagScan scan =
-            allowedTagIds == null ? limelight.scan() : limelight.scan(allowedTagIds);
+      double nowSeconds = Timer.getFPGATimestamp();
+      Set<Integer> tags = allowedTagIds == null ? FieldConstants.hubTagIds() : allowedTagIds.get();
+      TargetObservation observation = limelight.observe(tags, drivebase);
 
-        if (!scan.isValid()) {
-            Logger.recordOutput("Shooter/LimelightShotValid", false);
-            Logger.recordOutput("Shooter/LimelightShotMessage", "No valid hub AprilTag target");
-            Logger.recordOutput("Shooter/LimelightDistanceMeters", 0.0);
-            Logger.recordOutput("Shooter/LimelightEquationRPM", 0.0);
-            Logger.recordOutput("Shooter/LimelightCommandedRPM", 0.0);
-            Logger.recordOutput("Shooter/LimelightTargetTagID", -1);
-            maybeReportInvalidTarget(nowSeconds);
-            wasLimelightShotValidLastCycle = false;
-            return RPM.of(0);
-        }
+      if (!observation.valid) {
+        Logger.recordOutput("Shooter/LimelightShotValid", false);
+        Logger.recordOutput("Shooter/LimelightShotMessage", observation.message);
+        Logger.recordOutput("Shooter/LimelightDistanceMeters", 0.0);
+        Logger.recordOutput("Shooter/LimelightModelRPM", 0.0);
+        Logger.recordOutput("Shooter/LimelightCommandedRPM", 0.0);
+        Logger.recordOutput("Shooter/LimelightTargetTagID", -1);
+        maybeReportInvalidTarget(nowSeconds, observation.message);
+        wasLimelightShotValidLastCycle = false;
+        commandedShotRpm = 0.0;
+        return RPM.of(0);
+      }
 
-        double measuredDistanceMeters = estimateTargetDistanceMeters(scan);
-        double distanceMeters = measuredDistanceMeters;
-        boolean distanceOutOfRange =
-            measuredDistanceMeters < LIMELIGHT_MIN_VALID_DISTANCE_METERS
-                || measuredDistanceMeters > LIMELIGHT_MAX_VALID_DISTANCE_METERS;
-        if (distanceOutOfRange) {
-          distanceMeters = LIMELIGHT_REFERENCE_DISTANCE_METERS;
-        }
-        int distanceBucket = bucketForDistance(distanceMeters);
-        double distanceTrimRpm = limelightDistanceTrimRpm[distanceBucket];
-        double equationRPM = rpmForDistanceMeters(distanceMeters) + distanceTrimRpm;
-        double scaledEquationRPM = equationRPM * LIMELIGHT_RPM_SCALE;
-        TableEstimate tableEstimate = estimateFromShotTable(distanceMeters, scaledEquationRPM);
-        double rangedRecommended = MathUtil.clamp(
-            tableEstimate.recommendedRpm,
-            tableEstimate.rangeMinRpm,
-            tableEstimate.rangeMaxRpm);
-        double commandedRPM = MathUtil.clamp(rangedRecommended, LIMELIGHT_SHOT_MIN_RPM, LIMELIGHT_SHOT_MAX_RPM);
+      double measuredDistanceMeters = observation.shooterDistanceMeters;
+      double distanceMeters = measuredDistanceMeters;
+      boolean distanceOutOfRange = !observation.isWithinShootingRange();
+      if (distanceOutOfRange) {
+        // Rather than firing on a nonsense range, fall back to the one distance we know is
+        // calibrated. The flag is logged so this is obvious after the match.
+        distanceMeters = ShooterConstants.REFERENCE_DISTANCE_METERS;
+      }
 
-        Logger.recordOutput("Shooter/LimelightShotValid", true);
-        Logger.recordOutput("Shooter/LimelightShotMessage", "Scaled from 11ft 6in reference shot");
-        Logger.recordOutput("Shooter/LimelightEstimatedRPM", scaledEquationRPM);
-        Logger.recordOutput("Shooter/LimelightEquationRPM", scaledEquationRPM);
-        Logger.recordOutput("Shooter/LimelightCommandedRPM", commandedRPM);
-        Logger.recordOutput("Shooter/LimelightDistanceMeters", distanceMeters);
-        Logger.recordOutput("Shooter/LimelightMeasuredDistanceMeters", measuredDistanceMeters);
-        Logger.recordOutput("Shooter/LimelightDistanceOutOfRange", distanceOutOfRange);
-        Logger.recordOutput("Shooter/LimelightDistanceBucket", distanceBucket);
-        Logger.recordOutput("Shooter/LimelightDistanceTrimRPM", distanceTrimRpm);
-        Logger.recordOutput("Shooter/LimelightTableRecommendedRPM", tableEstimate.recommendedRpm);
-        Logger.recordOutput("Shooter/LimelightTableRangeMinRPM", tableEstimate.rangeMinRpm);
-        Logger.recordOutput("Shooter/LimelightTableRangeMaxRPM", tableEstimate.rangeMaxRpm);
-        Logger.recordOutput("Shooter/LimelightTableInterpolated", tableEstimate.interpolated);
-        Logger.recordOutput("Shooter/LimelightReferenceDistanceMeters", LIMELIGHT_REFERENCE_DISTANCE_METERS);
-        Logger.recordOutput("Shooter/LimelightReferenceRPM", LIMELIGHT_REFERENCE_RPM);
-        Logger.recordOutput("Shooter/LimelightRpmPerMeter", LIMELIGHT_RPM_PER_METER);
-        Logger.recordOutput("Shooter/LimelightRpmTrim", LIMELIGHT_RPM_TRIM);
-        Logger.recordOutput("Shooter/LimelightRpmScale", LIMELIGHT_RPM_SCALE);
-        Logger.recordOutput("Shooter/LimelightShotMaxRPM", LIMELIGHT_SHOT_MAX_RPM);
-        Logger.recordOutput("Shooter/LimelightTargetTagID", scan.tagID);
-        cacheShooterAttemptSample(
-            nowSeconds,
-            scan,
-            distanceMeters,
-            tableEstimate.recommendedRpm,
-            commandedRPM,
-            fixedLaunchAngleDegrees,
-            distanceBucket);
-        wasLimelightShotValidLastCycle = true;
+      int distanceBucket = bucketForDistance(distanceMeters);
+      double distanceTrimRpm = limelightDistanceTrimRpm[distanceBucket];
+      double modelRpm = modelRpmForDistance(distanceMeters) + distanceTrimRpm;
 
-        return RPM.of(commandedRPM);
+      TableEstimate tableEstimate = estimateFromShotTable(distanceMeters, modelRpm);
+      double rangedRecommended = MathUtil.clamp(
+          tableEstimate.recommendedRpm,
+          tableEstimate.rangeMinRpm,
+          tableEstimate.rangeMaxRpm);
+      double commandedRPM = MathUtil.clamp(
+          rangedRecommended, ShooterConstants.MIN_SHOT_RPM, ShooterConstants.MAX_SHOT_RPM);
+
+      Logger.recordOutput("Shooter/LimelightShotValid", true);
+      Logger.recordOutput("Shooter/LimelightShotMessage",
+          tableEstimate.fromTable ? "Learned shot table" : "Physics model anchored on reference shot");
+      Logger.recordOutput("Shooter/LimelightModelRPM", modelRpm);
+      Logger.recordOutput("Shooter/LimelightCommandedRPM", commandedRPM);
+      Logger.recordOutput("Shooter/LimelightDistanceMeters", distanceMeters);
+      Logger.recordOutput("Shooter/LimelightMeasuredDistanceMeters", measuredDistanceMeters);
+      Logger.recordOutput("Shooter/LimelightDistanceOutOfRange", distanceOutOfRange);
+      Logger.recordOutput("Shooter/LimelightDistanceBucket", distanceBucket);
+      Logger.recordOutput("Shooter/LimelightDistanceTrimRPM", distanceTrimRpm);
+      Logger.recordOutput("Shooter/LimelightTableRecommendedRPM", tableEstimate.recommendedRpm);
+      Logger.recordOutput("Shooter/LimelightTableRangeMinRPM", tableEstimate.rangeMinRpm);
+      Logger.recordOutput("Shooter/LimelightTableRangeMaxRPM", tableEstimate.rangeMaxRpm);
+      Logger.recordOutput("Shooter/LimelightTableInterpolated", tableEstimate.interpolated);
+      Logger.recordOutput("Shooter/LimelightTableUsed", tableEstimate.fromTable);
+      Logger.recordOutput("Shooter/DistanceSource", observation.distanceSource);
+      Logger.recordOutput("Shooter/TransferEfficiency", ProjectileMotion.FLYWHEEL_TRANSFER_EFFICIENCY);
+      Logger.recordOutput("Shooter/LimelightTargetTagID", observation.tagId);
+
+      cacheShooterAttemptSample(
+          nowSeconds, observation, distanceMeters, modelRpm, commandedRPM, distanceBucket);
+      wasLimelightShotValidLastCycle = true;
+      commandedShotRpm = commandedRPM;
+
+      return RPM.of(commandedRPM);
     }).beforeStarting(() -> {
       activeShooterAttemptId = LimelightAttemptTracker.nextAttemptId();
       lastInvalidTargetWarningTimestamp = -1.0;
       wasLimelightShotValidLastCycle = true;
       shooterAttemptHasValidSample = false;
       warnedInvalidTargetThisAttempt = false;
+      commandedShotRpm = 0.0;
       System.out.printf(
           "LIMELIGHT_ATTEMPT_START,source=SHOOTER,attempt=%d%n",
           activeShooterAttemptId);
     }).finallyDo(() -> {
-      leaderSpark.set(0);
       wasLimelightShotValidLastCycle = true;
       lastInvalidTargetWarningTimestamp = -1.0;
+      commandedShotRpm = 0.0;
       if (shooterAttemptHasValidSample) {
         printShotTelemetryRow();
         pendingFeedbackBucket = shooterAttemptLastDistanceBucket;
@@ -276,43 +311,35 @@ public Command setPercentAsRPM(Supplier<Double> percentSupplier) {
       warnedInvalidTargetThisAttempt = false;
       pendingFeedbackDistanceMeters = 0.0;
       pendingFeedbackCommandedRpm = 0.0;
-    });
-}
-
-  private double estimateTargetDistanceMeters(LimeLight limelight) {
-    return estimateTargetDistanceMeters(limelight.scan());
+    }).withName("Shooter.setSpeedFromLimelight");
   }
 
-  private double estimateTargetDistanceMeters(LimeLight.AprilTagScan scan) {
-    if (!scan.isValid()) {
-      return 0.0;
+  /**
+   * Baseline RPM for a range, before any learned-table override.
+   *
+   * <p>Falls back to the reference shot if the geometry is unsolvable — which happens when the
+   * target is so close that a 45 degree launch cannot come back down in time.
+   */
+  private double modelRpmForDistance(double distanceMeters) {
+    double physicsRpm = ProjectileMotion.flywheelRpmForDistance(distanceMeters);
+    if (!Double.isFinite(physicsRpm)) {
+      return ShooterConstants.REFERENCE_RPM;
     }
-
-    double ty = scan.ty;
-    double totalAngleRad = Math.toRadians(SHOOTING_LIMELIGHT_MOUNT_ANGLE_DEGREES + ty);
-    if (Math.abs(totalAngleRad) < 1e-6) {
-      return 0.0;
-    }
-
-    double distanceMeters =
-        (ProjectileMotion.HUB_APRILTAG_HEIGHT_METERS - ProjectileMotion.LIMELIGHT_MOUNT_HEIGHT_METERS)
-            / Math.tan(totalAngleRad);
-    return Math.max(0.0, distanceMeters);
+    return physicsRpm;
   }
 
   private double rpmForDistanceMeters(double distanceMeters) {
     if (distanceMeters <= 0.0) {
       return 0.0;
     }
-
-    double distanceOffsetMeters = distanceMeters - LIMELIGHT_REFERENCE_DISTANCE_METERS;
-    return LIMELIGHT_REFERENCE_RPM + (distanceOffsetMeters * LIMELIGHT_RPM_PER_METER) + LIMELIGHT_RPM_TRIM;
+    return modelRpmForDistance(distanceMeters);
   }
 
   @Override
   public void periodic() {
     Logger.recordOutput("Shooter/LeaderVelocity", leaderSpark.getEncoder().getVelocity());
     Logger.recordOutput("Shooter/FollowerVelocity", followerSpark.getEncoder().getVelocity());
+    Logger.recordOutput("Shooter/AtShotSpeed", isAtShotSpeed());
     maybeFinalizeFeedbackWindow();
   }
 
@@ -321,7 +348,7 @@ public Command setPercentAsRPM(Supplier<Double> percentSupplier) {
     shooter.simIterate();
   }
 
-  private void maybeReportInvalidTarget(double nowSeconds) {
+  private void maybeReportInvalidTarget(double nowSeconds, String reason) {
     int attemptId = activeShooterAttemptId;
     if (attemptId < 0) {
       return;
@@ -330,8 +357,9 @@ public Command setPercentAsRPM(Supplier<Double> percentSupplier) {
     if (wasLimelightShotValidLastCycle) {
       DriverStation.reportWarning(
           String.format(
-              "[SHOT][WARN][SHOOTER][ATTEMPT %d] Limelight target invalid during shoot command (no approved tag / no target).",
-              attemptId),
+              "[SHOT][WARN][SHOOTER][ATTEMPT %d] Limelight target invalid during shoot command (%s).",
+              attemptId,
+              reason),
           false);
       lastInvalidTargetWarningTimestamp = nowSeconds;
       warnedInvalidTargetThisAttempt = true;
@@ -352,29 +380,27 @@ public Command setPercentAsRPM(Supplier<Double> percentSupplier) {
 
   private void cacheShooterAttemptSample(
       double nowSeconds,
-      LimeLight.AprilTagScan scan,
+      TargetObservation observation,
       double distanceMeters,
-      double equationRPM,
+      double modelRpm,
       double commandedRPM,
-      double fixedLaunchAngleDegrees,
       int distanceBucket) {
     shooterAttemptHasValidSample = true;
     shooterAttemptLastTimestampSeconds = nowSeconds;
-    shooterAttemptLastTagId = scan.tagID;
+    shooterAttemptLastTagId = observation.tagId;
     shooterAttemptLastDistanceMeters = distanceMeters;
-    shooterAttemptLastEquationRpm = equationRPM;
+    shooterAttemptLastEquationRpm = modelRpm;
     shooterAttemptLastCommandedRpm = commandedRPM;
     shooterAttemptLastActualRpm = getSpeed().in(RPM);
-    shooterAttemptLastTxDegrees = scan.tx;
-    shooterAttemptLastTyDegrees = scan.ty;
-    shooterAttemptLastLaunchAngleDegrees = fixedLaunchAngleDegrees;
+    shooterAttemptLastBearingDegrees = observation.robotBearingDegrees;
+    shooterAttemptLastTurretAngleDegrees = observation.turretAngleDegrees;
     shooterAttemptLastDistanceBucket = distanceBucket;
   }
 
   private void printShotTelemetryRow() {
     if (!printedShotHeader) {
       System.out.println(
-          "SHOT_TABLE_HEADER,source,attempt,time_s,tag_id,distance_m,equation_rpm,commanded_rpm,actual_rpm,tx_deg,ty_deg,launch_angle_deg");
+          "SHOT_TABLE_HEADER,source,attempt,time_s,tag_id,distance_m,model_rpm,commanded_rpm,actual_rpm,robot_bearing_deg,turret_angle_deg,launch_angle_deg");
       printedShotHeader = true;
     }
 
@@ -387,21 +413,21 @@ public Command setPercentAsRPM(Supplier<Double> percentSupplier) {
         shooterAttemptLastEquationRpm,
         shooterAttemptLastCommandedRpm,
         shooterAttemptLastActualRpm,
-        shooterAttemptLastTxDegrees,
-        shooterAttemptLastTyDegrees,
-        shooterAttemptLastLaunchAngleDegrees);
+        shooterAttemptLastBearingDegrees,
+        shooterAttemptLastTurretAngleDegrees,
+        ShooterConstants.LAUNCH_ANGLE_DEGREES);
   }
 
   public Command increaseLimelightPowerForLastShotCommand() {
-    return runOnce(() -> applyFeedbackTrim(LIMELIGHT_FEEDBACK_STEP_RPM));
+    return runOnce(() -> applyFeedbackTrim(LIMELIGHT_FEEDBACK_STEP_RPM)).ignoringDisable(true);
   }
 
   public Command decreaseLimelightPowerForLastShotCommand() {
-    return runOnce(() -> applyFeedbackTrim(-LIMELIGHT_FEEDBACK_STEP_RPM));
+    return runOnce(() -> applyFeedbackTrim(-LIMELIGHT_FEEDBACK_STEP_RPM)).ignoringDisable(true);
   }
 
   public Command confirmMadeShotCommand() {
-    return runOnce(this::confirmMadeShotNow);
+    return runOnce(this::confirmMadeShotNow).ignoringDisable(true);
   }
 
   private void applyFeedbackTrim(double deltaRpm) {
@@ -512,7 +538,7 @@ public Command setPercentAsRPM(Supplier<Double> percentSupplier) {
     int bucket = bucketForDistance(distanceMeters);
     if (tableSampleCount[bucket] > 0) {
       double avg = tableRpmSum[bucket] / tableSampleCount[bucket];
-      return new TableEstimate(avg, tableRpmMin[bucket], tableRpmMax[bucket], false);
+      return new TableEstimate(avg, tableRpmMin[bucket], tableRpmMax[bucket], false, true);
     }
 
     int lower = findLowerBucketWithData(bucket);
@@ -530,23 +556,31 @@ public Command setPercentAsRPM(Supplier<Double> percentSupplier) {
       double recommended = lerp(lowerAvg, upperAvg, t);
       double rangeMin = lerp(tableRpmMin[lower], tableRpmMin[upper], t);
       double rangeMax = lerp(tableRpmMax[lower], tableRpmMax[upper], t);
-      return new TableEstimate(recommended, rangeMin, rangeMax, true);
+      return new TableEstimate(recommended, rangeMin, rangeMax, true, true);
     }
 
-    if (lower >= 0) {
-      double avg = tableRpmSum[lower] / tableSampleCount[lower];
-      return new TableEstimate(avg, tableRpmMin[lower], tableRpmMax[lower], true);
-    }
-
-    if (upper >= 0) {
-      double avg = tableRpmSum[upper] / tableSampleCount[upper];
-      return new TableEstimate(avg, tableRpmMin[upper], tableRpmMax[upper], true);
+    // Only one side of the table has data. Extrapolating a flat value out to an untested range is
+    // worse than trusting the physics curve, so blend toward the model by how far outside the
+    // tested range we are.
+    if (lower >= 0 || upper >= 0) {
+      int nearest = lower >= 0 ? lower : upper;
+      double nearestAvg = tableRpmSum[nearest] / tableSampleCount[nearest];
+      double bucketsAway = Math.abs(bucket - nearest);
+      double modelWeight = MathUtil.clamp(bucketsAway / 3.0, 0.0, 1.0);
+      double recommended = lerp(nearestAvg, fallbackRpm, modelWeight);
+      double halfWidth = lerp(
+          Math.max(tableRpmMax[nearest] - tableRpmMin[nearest], 1.0) / 2.0,
+          DEFAULT_RANGE_HALF_WIDTH_RPM,
+          modelWeight);
+      return new TableEstimate(
+          recommended, recommended - halfWidth, recommended + halfWidth, true, modelWeight < 1.0);
     }
 
     return new TableEstimate(
         fallbackRpm,
         fallbackRpm - DEFAULT_RANGE_HALF_WIDTH_RPM,
         fallbackRpm + DEFAULT_RANGE_HALF_WIDTH_RPM,
+        false,
         false);
   }
 
@@ -569,7 +603,8 @@ public Command setPercentAsRPM(Supplier<Double> percentSupplier) {
   }
 
   private void recordConfirmedShot(int bucket, double distanceMeters, double commandedRpm) {
-    double rpm = MathUtil.clamp(commandedRpm, LIMELIGHT_SHOT_MIN_RPM, LIMELIGHT_SHOT_MAX_RPM);
+    double rpm = MathUtil.clamp(
+        commandedRpm, ShooterConstants.MIN_SHOT_RPM, ShooterConstants.MAX_SHOT_RPM);
     tableRpmSum[bucket] += rpm;
     tableSampleCount[bucket]++;
     tableRpmMin[bucket] = tableSampleCount[bucket] == 1 ? rpm : Math.min(tableRpmMin[bucket], rpm);
@@ -603,6 +638,22 @@ public Command setPercentAsRPM(Supplier<Double> percentSupplier) {
     Preferences.setDouble(shotTableMaxPreferenceKey(bucket), tableRpmMax[bucket]);
   }
 
+  /** Wipes every learned shot and per-distance trim. Use after changing the shooter mechanically. */
+  public Command clearLearnedShotDataCommand() {
+    return runOnce(() -> {
+      for (int i = 0; i < DISTANCE_BUCKET_COUNT; i++) {
+        limelightDistanceTrimRpm[i] = 0.0;
+        tableRpmSum[i] = 0.0;
+        tableRpmMin[i] = 0.0;
+        tableRpmMax[i] = 0.0;
+        tableSampleCount[i] = 0;
+        savePersistentDistanceTrim(i);
+        savePersistentShotTableBucket(i);
+      }
+      System.out.println("SHOT_TABLE_CLEARED,source=SHOOTER");
+    }).ignoringDisable(true).withName("Shooter.clearLearnedShotData");
+  }
+
   private void printShotTableSummary() {
     int populatedBuckets = 0;
     for (int i = 0; i < DISTANCE_BUCKET_COUNT; i++) {
@@ -620,19 +671,21 @@ public Command setPercentAsRPM(Supplier<Double> percentSupplier) {
     }
 
     System.out.println("SHOT_TABLE_MARKDOWN_BEGIN");
-    System.out.println("| Distance (m) | RPM Min | RPM Avg | RPM Max | Samples |");
-    System.out.println("| --- | --- | --- | --- | --- |");
+    System.out.println("| Distance (m) | RPM Min | RPM Avg | RPM Max | Model RPM | Samples |");
+    System.out.println("| --- | --- | --- | --- | --- | --- |");
     for (int i = 0; i < DISTANCE_BUCKET_COUNT; i++) {
       if (tableSampleCount[i] <= 0) {
         continue;
       }
       double avg = tableRpmSum[i] / tableSampleCount[i];
+      double centerDistance = bucketCenterDistanceMeters(i);
       System.out.printf(
-          "| %.2f | %.1f | %.1f | %.1f | %d |%n",
-          bucketCenterDistanceMeters(i),
+          "| %.2f | %.1f | %.1f | %.1f | %.1f | %d |%n",
+          centerDistance,
           tableRpmMin[i],
           avg,
           tableRpmMax[i],
+          rpmForDistanceMeters(centerDistance),
           tableSampleCount[i]);
     }
     System.out.println("SHOT_TABLE_MARKDOWN_END");
@@ -667,12 +720,20 @@ public Command setPercentAsRPM(Supplier<Double> percentSupplier) {
     final double rangeMinRpm;
     final double rangeMaxRpm;
     final boolean interpolated;
+    /** True when learned data contributed, false when this is purely the physics model. */
+    final boolean fromTable;
 
-    TableEstimate(double recommendedRpm, double rangeMinRpm, double rangeMaxRpm, boolean interpolated) {
+    TableEstimate(
+        double recommendedRpm,
+        double rangeMinRpm,
+        double rangeMaxRpm,
+        boolean interpolated,
+        boolean fromTable) {
       this.recommendedRpm = recommendedRpm;
       this.rangeMinRpm = rangeMinRpm;
       this.rangeMaxRpm = rangeMaxRpm;
       this.interpolated = interpolated;
+      this.fromTable = fromTable;
     }
   }
 
@@ -688,7 +749,7 @@ public Command setPercentAsRPM(Supplier<Double> percentSupplier) {
   }
 
   private Distance wheelRadius() {
-    return Inches.of(4).div(2);
+    return Inches.of(ShooterConstants.WHEEL_DIAMETER_INCHES).div(2);
   }
 
   public LinearVelocity getTangentialVelocity() {

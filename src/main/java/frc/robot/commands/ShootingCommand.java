@@ -8,7 +8,11 @@ import frc.robot.subsystems.ShooterSubsystem;
 
 public class ShootingCommand extends SequentialCommandGroup {
   private static final double SPINUP_SECONDS = 1.50;
-  private static final double FIRST_FEED_SECONDS = 17;
+  /**
+   * Was 17 seconds — longer than the entire 15 second autonomous period, so the sequence could
+   * never reach the steps after it and the shooter never stopped on its own.
+   */
+  private static final double FIRST_FEED_SECONDS = 6.0;
   private static final double STOP_BACKFEED_SECONDS = 1.00;
   private static final double SECOND_FEED_SECONDS = 1.00;
 

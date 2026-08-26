@@ -122,6 +122,19 @@ public class LimeLight {
         ledModeEntry.setNumber(number);
     }
 
+    /**
+     * Selects the AprilTag pipeline and hands LED control back to it. Safe to call repeatedly.
+     *
+     * <p>The lens pose is deliberately NOT pushed from here. It belongs in the Limelight web UI, so
+     * the camera's own 3D solve and {@link frc.robot.Constants.LimeLightConstants} stay in sync
+     * from a single source and a sign mistake in code cannot silently corrupt the camera output.
+     */
+    public void configureForAprilTags() {
+        table.getEntry("pipeline")
+            .setNumber(frc.robot.Constants.LimeLightConstants.APRILTAG_PIPELINE);
+        ledModeEntry.setNumber(0);
+    }
+
     public double getPipelineLatencyMs() {
         return tlEntry.getDouble(0.0);
     }
@@ -185,18 +198,22 @@ public class LimeLight {
    * Returns TX corrected for the limelight's lateral offset from robot center.
    * When correctedTX == 0, the robot center (not the limelight) is aimed at the target.
    *
-   * correctedTX = tx - atan2(lateralOffset, distance)
+   * correctedTX = tx + atan2(lateralOffset, distance)
    *
-   * The parallax term is always subtracted because the limelight is always
-   * to the right of robot center — it will always read slightly more rightward
-   * than a centered camera would, so we compensate by subtracting.
+   * <p>The parallax term is ADDED, not subtracted. The lens sits to the RIGHT of robot center, so
+   * a target sitting dead ahead of the lens (tx = 0) is genuinely off to the robot's right, and a
+   * centered camera would read it as positive tx. Compensating therefore means adding.
+   *
+   * <p>This previously subtracted, which pushed the chassis the wrong way by about 4.5 degrees at
+   * 3 m — over four times ALIGN_TOLERANCE_DEGREES, so the align loop settled off-target and the
+   * error grew as the robot got closer.
    */
   public double getCorrectedTX() {
     if (!hasTarget()) return 0.0;
-    double distanceInches = getLimelightAprilDistance_BasedScales() * 39.37;
+    double distanceInches = Math.max(getLimelightAprilDistance_BasedScales() * 39.37, 1.0);
     double parallax = Math.toDegrees(
         Math.atan2(LIMELIGHT_LATERAL_OFFSET_INCHES, distanceInches));
-    return getTX() - parallax;
+    return getTX() + parallax;
   }
 
   public double getCorrectedTX(AprilTagScan scan) {
@@ -207,7 +224,50 @@ public class LimeLight {
     double distanceInches = Math.max(scan.distance * 39.37, 1.0);
     double parallax = Math.toDegrees(
         Math.atan2(LIMELIGHT_LATERAL_OFFSET_INCHES, distanceInches));
-    return scan.tx - parallax;
+    return scan.tx + parallax;
+  }
+
+  // ---- Solved observations -------------------------------------------------
+  // Raw tx/ty are camera-frame angles. Everything that aims or ranges should go through
+  // VisionTargeting instead, which resolves them into robot-frame geometry exactly once.
+
+  /** Resolves the closest alliance HUB tag into robot-frame geometry. */
+  public VisionTargeting.TargetObservation observeHub() {
+    return VisionTargeting.solve(scan(frc.robot.FieldConstants.hubTagIds()), 0.0);
+  }
+
+  /**
+   * Resolves the closest alliance HUB tag, compensating for how far the chassis has yawed since
+   * the frame was captured.
+   */
+  public VisionTargeting.TargetObservation observeHub(SwerveSubsystem drivebase) {
+    double omega = drivebase == null ? 0.0 : drivebase.getRobotVelocity().omegaRadiansPerSecond;
+    return VisionTargeting.solve(scan(frc.robot.FieldConstants.hubTagIds()), omega);
+  }
+
+  /** Resolves an arbitrary allowed-tag set into robot-frame geometry. */
+  public VisionTargeting.TargetObservation observe(
+      Set<Integer> allowedTagIds, SwerveSubsystem drivebase) {
+    double omega = drivebase == null ? 0.0 : drivebase.getRobotVelocity().omegaRadiansPerSecond;
+    return VisionTargeting.solve(scan(allowedTagIds), omega);
+  }
+
+  /**
+   * Tells the camera to ignore every tag outside this set, so a stray tag in the background cannot
+   * become the "closest" target mid-shot.
+   */
+  public void setTagFilter(Set<Integer> allowedTagIds) {
+    double[] ids = new double[allowedTagIds.size()];
+    int i = 0;
+    for (int id : allowedTagIds) {
+      ids[i++] = id;
+    }
+    table.getEntry("fiducial_id_filters_set").setDoubleArray(ids);
+  }
+
+  /** Clears any tag ID filter. */
+  public void clearTagFilter() {
+    table.getEntry("fiducial_id_filters_set").setDoubleArray(new double[0]);
   }
 
   public double getAlignOmega() {
@@ -219,9 +279,19 @@ public class LimeLight {
 
   // commands
 
+  /**
+   * Forwards the Limelight's web ports over its USB-ethernet connection.
+   *
+   * <p>Local ports start at 5810, NOT 5800. A PortForwarder entry is keyed by local port, so when
+   * this used 5800 for index 0 it collided with setupPortForwardingRobotWifi() and whichever ran
+   * second silently replaced the first. Robot.java calls both, so the USB route was thrown away
+   * every boot.
+   *
+   * <p>Reach the camera over USB at localhost:5810, over the radio at localhost:5800.
+   */
   public static void setupPortForwardingUSB(int usbIndex) {
         String ip = "172.29." + usbIndex + ".1";
-        int basePort = 5800 + (usbIndex * 10);
+        int basePort = 5810 + (usbIndex * 10);
 
         for (int i = 0; i < 10; i++) {
             PortForwarder.add(basePort + i, ip, 5800 + i);
