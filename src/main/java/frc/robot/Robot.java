@@ -77,8 +77,10 @@ public class Robot extends TimedRobot
     // immediately when disabled, but then also let it be pushed more 
     disabledTimer = new Timer();
 
-    LimeLight.setupPortForwardingUSB(0);
-    LimeLight.setupPortForwardingRobotWifi();
+    // Forwards mDNS, static IP and USB routes at once, and prints every URL to try. These were two
+    // separate calls that both claimed local ports 5800-5809, so the second silently replaced the
+    // first and only one route ever actually worked.
+    LimeLight.setupPortForwarding();
 
     if (isSimulation())
     {

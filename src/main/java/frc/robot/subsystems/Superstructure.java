@@ -17,6 +17,7 @@ import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.wpilibj2.command.button.Trigger;
+import frc.robot.Constants;
 import frc.robot.FieldConstants;
 import frc.robot.commands.HubLineupCommand;
 import frc.robot.commands.TurretTrackCommand;
@@ -321,8 +322,27 @@ public Command manualTurretControl(Supplier<Double> speedSupplier) {
   }
 
   /**
-   * Full one-button shot: drive to range, hold the turret on the hub, spin the flywheel to the
-   * vision-computed speed, and feed once both are genuinely ready.
+   * TRACK AND SHOOT. Aims, spins, and fires without ever touching the drivebase.
+   *
+   * <p>The driver keeps full control of the chassis throughout, so this is the one to use while
+   * dodging defense or shooting from a spot the driver picked. Deliberately distinct from
+   * {@link #autoShootCommand}, which moves the robot.
+   */
+  public Command trackAndShootCommand(SwerveSubsystem drivebase) {
+    Command aimAndSpin = Commands.parallel(
+        trackHubTagsCommand(drivebase),
+        shooter.setSpeedFromLimelight(limelight, drivebase));
+
+    Command fireWhenReady = Commands.sequence(
+        Commands.waitUntil(isVisionReadyToShoot).withTimeout(2.0),
+        feedAllCommand());
+
+    return Commands.deadline(fireWhenReady, aimAndSpin)
+        .withName("Superstructure.trackAndShoot");
+  }
+
+  /**
+   * LINEUP AND SHOOT. Drives to the calibrated range first, then aims, spins, and fires.
    *
    * <p>The lineup runs only until it settles and then releases the chassis, so holding the button
    * does not pin the robot in place for the rest of the match.
@@ -395,7 +415,19 @@ public Command manualTurretControl(Supplier<Double> speedSupplier) {
   }
 
 
+  /**
+   * Runs the hopper and kicker to feed the shooter.
+   *
+   * <p>The pivot bounce is dropped while the intake is disabled. Feeding is a shooter action, so it
+   * still needs to work with the intake out of service — it just stops jogging the pivot to do it.
+   */
   public Command feedAllCommand() {
+    if (!Constants.IntakeConstants.ENABLED) {
+      return Commands.parallel(
+          hopper.feedCommand().asProxy(),
+          kicker.feedCommand().asProxy()).withName("Superstructure.feedAll(noIntake)");
+    }
+
     return Commands.parallel(
         hopper.feedCommand().asProxy(),
         kicker.feedCommand().asProxy(),
@@ -403,7 +435,12 @@ public Command manualTurretControl(Supplier<Double> speedSupplier) {
     // intake.setPivotAngle(Degrees.of(46)).asProxy()).withName("Superstructure.feedAll");
   }
 
+  /** Reverses the feed path. Drops the intake leg while the intake is disabled. */
   public Command backFeedAllCommand() {
+    if (!Constants.IntakeConstants.ENABLED) {
+      return hopper.backFeedCommand().asProxy().withName("Superstructure.backFeedAll(noIntake)");
+    }
+
     return Commands.parallel(
         hopper.backFeedCommand().asProxy(),
         intake.backFeedAndRollCommand().asProxy()).withName("Superstructure.backFeedAll");

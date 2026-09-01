@@ -104,7 +104,12 @@ public class TurretTrackCommand extends Command {
     lastLogTimestampSeconds = -1.0;
     lastCommandedAngleDegrees = turret.getRawAngle().in(Degrees);
     turret.clearTrackingTelemetry();
-    limelight.setTagFilter(allowedTagIds.get());
+
+    // Deliberately does NOT push a camera-side tag filter. limelight.observe() already picks the
+    // closest allowed tag in software, which is stateless. The camera-side filter did the same job
+    // but persisted on the hardware if this command never reached end(), leaving the Limelight
+    // apparently blind to every other tag until someone power-cycled it.
+    limelight.clearTagFilter();
   }
 
   @Override
@@ -120,6 +125,7 @@ public class TurretTrackCommand extends Command {
       // Hold station rather than snapping anywhere. A dropout is usually a single frame.
       turret.setClosedLoopAngle(Degrees.of(lastCommandedAngleDegrees));
       maybeLog("NO_TARGET", observation, currentAngleDegrees, lastCommandedAngleDegrees);
+      reportWhyNoTarget();
       return;
     }
 
@@ -219,6 +225,48 @@ public class TurretTrackCommand extends Command {
         commandedDegrees,
         observation.shooterDistanceMeters,
         observation.distanceSource);
+  }
+
+  private double lastNoTargetWarningSeconds = -1.0;
+
+  /**
+   * Says WHY there is no target, rather than just that there isn't one.
+   *
+   * <p>"No target" has two completely different causes with completely different fixes: the camera
+   * genuinely sees nothing (aim it, check exposure, check the pipeline), or it sees tags that are
+   * not in the set we accept (wrong alliance, wrong tag IDs, a practice tag on the shop floor).
+   * Printing the visible IDs alongside the accepted ones makes that a one-glance diagnosis.
+   */
+  private void reportWhyNoTarget() {
+    double nowSeconds = Timer.getFPGATimestamp();
+    if (lastNoTargetWarningSeconds >= 0.0 && nowSeconds - lastNoTargetWarningSeconds < 2.0) {
+      return;
+    }
+    lastNoTargetWarningSeconds = nowSeconds;
+
+    int[] visible = limelight.getVisibleTagIds();
+    Set<Integer> allowed = allowedTagIds.get();
+
+    if (visible.length == 0) {
+      DriverStation.reportWarning(
+          "[VISION] Camera sees NO AprilTags at all. Check that it is powered, on the AprilTag "
+              + "pipeline, pointed at a tag, and not over-exposed.",
+          false);
+      return;
+    }
+
+    StringBuilder seen = new StringBuilder();
+    for (int i = 0; i < visible.length; i++) {
+      seen.append(i == 0 ? "" : ", ").append(visible[i]);
+    }
+    DriverStation.reportWarning(
+        String.format(
+            "[VISION] Camera sees tag(s) [%s] but none are accepted. Accepting %s for alliance %s. "
+                + "Wrong alliance or wrong tag IDs.",
+            seen,
+            allowed,
+            FieldConstants.alliance()),
+        false);
   }
 
   private double lastOutOfRangeWarningSeconds = -1.0;

@@ -20,6 +20,7 @@ import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 import edu.wpi.first.wpilibj.shuffleboard.SimpleWidget;
 import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
+import frc.robot.Constants;
 import frc.robot.subsystems.ProjectileMotion.ShotSolution;
 import frc.robot.subsystems.swervedrive.SwerveSubsystem;
 
@@ -68,6 +69,7 @@ public class ShuffleboardManager {
     private static final String SHOOTING_TAB = "2026 Shooting";
     private static final String DRIVE_TAB = "2026 Drive";
     private static final String MATCH_TAB = "2026 Match";
+    private static final String CONTROLS_TAB = "2026 Controls";
     private static final String DASHBOARD_BUILD = "2026_MATCH_V3";
 
     private final LimeLight limelight;
@@ -327,8 +329,69 @@ public class ShuffleboardManager {
         entrySelectedDriveScale = matchVision.add("Drive Speed", 6.5);
         entrySelectedStartPose = matchVision.add("Start Pose", StartPosition.CENTER.toString());
 
+        buildControlsTab();
         initializeFieldDecor();
         Shuffleboard.selectTab(MATCH_TAB);
+    }
+
+    /**
+     * Static button map, shown on its own driver station tab.
+     *
+     * <p>Written out as plain labelled strings rather than live values: this is a reference card the
+     * drive team reads between matches, so it must stay readable whether or not the robot is
+     * connected. Everything here is a HELD button unless the label says otherwise.
+     *
+     * <p><b>Keep this in sync with RobotContainer.</b> If a binding moves and this does not, the
+     * dashboard becomes actively misleading, which is worse than having no map at all.
+     */
+    private void buildControlsTab() {
+        ShuffleboardTab tab = Shuffleboard.getTab(CONTROLS_TAB);
+
+        ShuffleboardLayout driver = tab
+                .getLayout("DRIVER  (port 0)", BuiltInLayouts.kList)
+                .withPosition(0, 0)
+                .withSize(3, 6)
+                .withProperties(Map.of("Label position", "LEFT"));
+
+        driver.add("Left stick", "Drive / strafe");
+        driver.add("Right stick", "Rotate");
+        driver.add("A", "Zero gyro");
+        driver.add("Y  (hold)", "Square up to tag (rotate only)");
+        driver.add("Right bumper (hold)", "LINE UP: rotate + drive to range");
+        driver.add("Left bumper (hold)", "Lock wheels (X pattern)");
+        driver.add("Start (hold)", "Line up on TOWER to climb");
+        driver.add("Back (hold)", "Center modules / print encoders");
+        driver.add("Right stick click", "Robot-relative drive");
+
+        ShuffleboardLayout shooting = tab
+                .getLayout("OPERATOR  -  Shooting", BuiltInLayouts.kList)
+                .withPosition(3, 0)
+                .withSize(3, 6)
+                .withProperties(Map.of("Label position", "LEFT"));
+
+        // The three vision actions are deliberately on three different buttons.
+        shooting.add("Y  (hold)", "TRACK + SHOOT: aim, spin, fire. Chassis NOT moved");
+        shooting.add("Left bumper (hold)", "LINE UP + SHOOT: drives to range, then fires");
+        shooting.add("Right bumper (hold)", "AIM ONLY: track + spin, never feeds");
+        shooting.add("A  (hold)", "Feed hopper + kicker (manual fire)");
+        shooting.add("Right trigger", "Manual flywheel spin-up");
+        shooting.add("X  (hold)", "Back-feed hopper");
+        shooting.add("Right stick X", "Manual turret override");
+
+        ShuffleboardLayout tuning = tab
+                .getLayout("OPERATOR  -  Shot tuning", BuiltInLayouts.kList)
+                .withPosition(6, 0)
+                .withSize(3, 6)
+                .withProperties(Map.of("Label position", "LEFT"));
+
+        tuning.add("POV Left  (tap)", "Last shot was LONG  -  trim RPM down");
+        tuning.add("POV Right (tap)", "Last shot was SHORT -  trim RPM up");
+        tuning.add("POV Down  (tap)", "Shot SCORED - save it to the table");
+        tuning.add("Rumble", "Feedback window is open (10 s)");
+        tuning.add("Intake", Constants.IntakeConstants.ENABLED
+                ? "B: intake   |   Left stick Y: pivot"
+                : "*** DISABLED *** (Constants.IntakeConstants.ENABLED)");
+        tuning.add("Note", "Bindings above are the 'Current Controls' profile");
     }
 
     public void update(ShotSolution activeSolution) {

@@ -166,15 +166,26 @@ private final ShuffleboardManager m_shuffleboard = new ShuffleboardManager(
   {
     new Trigger(() -> isCurrentShooterProfile() && shooterXbox.a().getAsBoolean())
         .whileTrue(m_superstructure.feedAllCommand());
-    // Vision aim + spin: turret holds the hub and the flywheel goes to the range-computed RPM.
-    // The chassis is untouched, so the driver keeps driving. (Was a Commands.none() placeholder.)
-    new Trigger(() -> isCurrentShooterProfile() && shooterXbox.y().getAsBoolean())
-        .whileTrue(m_superstructure.limelightShootCommand(drivebase));
+    // Three deliberately separate vision actions, on three separate buttons:
+    //   driver RB     -> LINEUP ONLY   : moves the chassis, never shoots
+    //   operator Y    -> TRACK + SHOOT : shoots, never moves the chassis
+    //   operator LB   -> LINEUP + SHOOT: does both
+    // Keeping them apart means the driver can reposition without firing, and the operator can fire
+    // without the robot driving itself out from under them.
 
-    // Full auto shot: line up, aim, spin, and feed once both are genuinely ready. Borrows the
-    // drivebase only until the lineup settles, then releases it back to the driver.
+    // TRACK AND SHOOT — aim, spin, and feed when ready. Chassis stays with the driver.
+    new Trigger(() -> isCurrentShooterProfile() && shooterXbox.y().getAsBoolean())
+        .whileTrue(m_superstructure.trackAndShootCommand(drivebase));
+
+    // LINEUP AND SHOOT — drive to range first, then the same. Borrows the drivebase only until the
+    // lineup settles, then releases it back to the driver.
     new Trigger(() -> isCurrentShooterProfile() && shooterXbox.leftBumper().getAsBoolean())
         .whileTrue(m_superstructure.autoShootCommand(drivebase));
+
+    // AIM ONLY — turret tracks and flywheel spins, but never feeds. For the operator who wants to
+    // pick the exact moment to fire with the manual feed on A.
+    new Trigger(() -> isCurrentShooterProfile() && shooterXbox.rightBumper().getAsBoolean())
+        .whileTrue(m_superstructure.limelightShootCommand(drivebase));
     driverXbox.y().whileTrue(m_limelight.alignCommand(drivebase));
     new Trigger(() -> isCurrentShooterProfile() && shooterXbox.povLeft().getAsBoolean())
         .onTrue(m_shooter.decreaseLimelightPowerForLastShotCommand());
@@ -201,9 +212,8 @@ private final ShuffleboardManager m_shuffleboard = new ShuffleboardManager(
           return shooterXbox.getRightX() * 0.35;
         }));
 
-m_intake.setDefaultCommand(
-    m_intake.manualPivot(() -> shooterXbox.getLeftY())
-);
+    configureIntakeKeys();
+
     new Trigger(() -> isCurrentShooterProfile() && shooterXbox.x().getAsBoolean())
         .whileTrue(m_hopper.backFeedCommand());
 
@@ -214,23 +224,48 @@ m_intake.setDefaultCommand(
     Trigger shooterSpinupTrigger = new Trigger(() -> isCurrentShooterProfile() && shooterXbox.getRightTriggerAxis() > 0.10);
     shooterSpinupTrigger.whileTrue(m_shooter.spinUp());
     shooterSpinupTrigger.onFalse(m_shooter.stop());
-    new Trigger(() -> isCurrentShooterProfile() && shooterXbox.b().getAsBoolean())
-        .whileTrue(m_superstructure.intakeCommand());
-
     new Trigger(() -> isAltShooterProfile() && shooterXbox.getRightTriggerAxis() > 0.10)
         .whileTrue(m_shooter.spinUp());
     new Trigger(() -> isAltShooterProfile() && shooterXbox.getLeftTriggerAxis() > 0.10)
         .whileTrue(Commands.parallel(
             m_hopper.feedCommand().asProxy(),
             m_kicker.feedCommand().asProxy()));
-    new Trigger(() -> isAltShooterProfile() && shooterXbox.a().getAsBoolean())
-        .whileTrue(m_superstructure.intakeCommand());
     new Trigger(() -> isAltShooterProfile() && shooterXbox.y().getAsBoolean())
         .whileTrue(m_hopper.backFeedCommand());
-    new Trigger(() -> isAltShooterProfile() && shooterXbox.b().getAsBoolean())
-        .whileTrue(m_intake.backFeedAndRollCommand());
 
     }
+
+  /**
+   * Every control that commands the intake, behind one switch.
+   *
+   * <p>While {@link Constants.IntakeConstants#ENABLED} is false the bindings below are never
+   * registered at all — the buttons simply do nothing for the intake — and the subsystem is parked
+   * on a default command that actively drives both motors to zero. Set that constant back to true
+   * to restore all of this exactly as it was.
+   */
+  private void configureIntakeKeys()
+  {
+    if (!Constants.IntakeConstants.ENABLED) {
+      m_intake.setDefaultCommand(m_intake.disabledCommand());
+      DriverStation.reportWarning(
+          "[INTAKE] Intake is DISABLED (Constants.IntakeConstants.ENABLED = false). "
+              + "Pivot and roller are held at zero and all intake buttons are inactive.",
+          false);
+      return;
+    }
+
+    m_intake.setDefaultCommand(
+        m_intake.manualPivot(() -> shooterXbox.getLeftY()));
+
+    new Trigger(() -> isCurrentShooterProfile() && shooterXbox.b().getAsBoolean())
+        .whileTrue(m_superstructure.intakeCommand());
+
+    new Trigger(() -> isAltShooterProfile() && shooterXbox.a().getAsBoolean())
+        .whileTrue(m_superstructure.intakeCommand());
+
+    new Trigger(() -> isAltShooterProfile() && shooterXbox.b().getAsBoolean())
+        .whileTrue(m_intake.backFeedAndRollCommand());
+  }
   
   /**
    * Vision-assisted drivebase moves.
@@ -328,19 +363,11 @@ m_intake.setDefaultCommand(
       
     }
 
-    configureLimelightBindings();
-      
-  }
-
-  // right now it's manual but plan to automate it
-  public void configureLimelightBindings()
-  {
-    driverXbox.rightBumper().whileTrue(
-      m_superstructure.limelightAlignCommand(drivebase)
-    );
-    driverXbox.start().whileTrue(
-      m_superstructure.climbBarAlignCommand(drivebase)
-    );
+    // Vision drivebase bindings live in configureLimeLightKeys(), called from the constructor.
+    // configureLimelightBindings() used to bind driverXbox.rightBumper() and .start() as well,
+    // which double-bound both buttons: two whileTrue commands, both requiring the drivebase, would
+    // be scheduled together and immediately interrupt each other. Removed in favour of the single
+    // set in configureLimeLightKeys().
   }
 
   /**

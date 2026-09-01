@@ -8,10 +8,13 @@ import edu.wpi.first.math.geometry.Rotation3d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.geometry.Translation3d;
 import edu.wpi.first.net.PortForwarder;
+import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.RobotController;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import frc.robot.subsystems.swervedrive.SwerveSubsystem;
+import edu.wpi.first.networktables.ConnectionInfo;
 import edu.wpi.first.networktables.NetworkTable;
 import edu.wpi.first.networktables.NetworkTableEntry;
 import edu.wpi.first.networktables.NetworkTableInstance;
@@ -75,6 +78,17 @@ public class LimeLight {
     private static final int RAW_FIDUCIAL_DISTANCE_INDEX = 4;
     private static final double MIN_REASONABLE_TAG_DISTANCE_METERS = 0.15;
     private static final double MAX_REASONABLE_TAG_DISTANCE_METERS = 20.0;
+    /** NT change-counter of tv the last time we looked, used to detect the camera publishing. */
+    private long lastNtChangeMicros = -1L;
+
+    /** FPGA time we last saw the camera publish anything at all. */
+    private double lastCameraUpdateSeconds = -1.0;
+
+    private double lastConnectionWarningSeconds = -1.0;
+
+    /** A camera that has not published for this long is treated as gone. */
+    private static final double CONNECTION_TIMEOUT_SECONDS = 1.0;
+
     private AprilTagScan cachedAnyScan = new AprilTagScan(false, -1, 0.0, 0.0, 0.0, 0.0, new Pose3d());
     private double cachedTa = 0.0;
     private double cachedTv = 0.0;
@@ -101,6 +115,108 @@ public class LimeLight {
         return cachedTv == 1;
     }
 
+    /**
+     * True when the camera is actually publishing to NetworkTables.
+     *
+     * <p>Distinct from {@link #hasTarget()}: a connected camera staring at a blank wall has no
+     * target, while a disconnected one also has no target. Only this tells the two apart, and they
+     * need completely different fixes — aim the camera versus fix the network.
+     */
+    public boolean isConnected() {
+        return tvEntry.exists()
+            && lastCameraUpdateSeconds >= 0.0
+            && (Timer.getFPGATimestamp() - lastCameraUpdateSeconds) < CONNECTION_TIMEOUT_SECONDS;
+    }
+
+    /** Seconds since the camera last published, or -1 if it never has. */
+    public double getSecondsSinceLastUpdate() {
+        if (lastCameraUpdateSeconds < 0.0) {
+            return -1.0;
+        }
+        return Timer.getFPGATimestamp() - lastCameraUpdateSeconds;
+    }
+
+    /**
+     * Reports the IP address of every NetworkTables client attached to the robot.
+     *
+     * <p>The Limelight joins the roboRIO's NT server as a client, so the robot already knows the
+     * camera's real address even when nothing else on the network can find it. That is the piece
+     * normally missing when the Hardware Manager comes up empty: not "is it there", but "what
+     * address is it on". Point a browser or the Hardware Manager straight at whatever this prints.
+     */
+    public static String describeNetworkTablesClients() {
+        ConnectionInfo[] connections = NetworkTableInstance.getDefault().getConnections();
+        if (connections.length == 0) {
+            return "no NetworkTables clients connected";
+        }
+
+        StringBuilder out = new StringBuilder();
+        for (ConnectionInfo connection : connections) {
+            boolean looksLikeLimelight =
+                connection.remote_id != null
+                    && connection.remote_id.toLowerCase().contains("limelight");
+            out.append(String.format(
+                "%n    %-22s %s:%d%s",
+                connection.remote_id,
+                connection.remote_ip,
+                connection.remote_port,
+                looksLikeLimelight ? "   <-- LIMELIGHT" : ""));
+        }
+        return out.toString();
+    }
+
+    /** Prints the address of every attached NT client, so the camera can be found by IP. */
+    public static void reportDiscoveredAddresses() {
+        System.out.println(
+            "=== LIMELIGHT: NetworkTables clients attached to the robot ==="
+                + describeNetworkTablesClients());
+        System.out.println(
+            "    Point a browser at http://<that ip>:5801, or type that IP into the"
+                + " Limelight Hardware Manager.");
+        System.out.println("=============================================================");
+    }
+
+    private boolean printedConnectedAddress = false;
+
+    /**
+     * Prints the camera's address the first time it actually connects.
+     *
+     * <p>Not done at boot: NetworkTables clients have not attached yet that early, so the list
+     * would always come back empty. Waiting for the first real connection means the line that gets
+     * printed is the address the camera is genuinely reachable on right now.
+     */
+    private void reportAddressOnceConnected(double nowSeconds) {
+        if (printedConnectedAddress || !isConnected()) {
+            return;
+        }
+        printedConnectedAddress = true;
+        reportDiscoveredAddresses();
+    }
+
+    private void reportConnectionIfDown(double nowSeconds) {
+        if (isConnected()) {
+            return;
+        }
+        if (lastConnectionWarningSeconds >= 0.0 && nowSeconds - lastConnectionWarningSeconds < 5.0) {
+            return;
+        }
+        lastConnectionWarningSeconds = nowSeconds;
+
+        String detail = tvEntry.exists()
+            ? String.format("stopped publishing %.1fs ago", getSecondsSinceLastUpdate())
+            : "has never published (NT table '" + table.getPath() + "' is empty)";
+        DriverStation.reportWarning(
+            "[VISION] Limelight NOT CONNECTED: " + detail
+                + ". Check power and ethernet, confirm the camera's NT name matches \""
+                + frc.robot.Constants.LimeLightConstants.NAME
+                + "\", and try the URLs printed at boot.",
+            false);
+        // Whatever IS attached is the best clue to where the camera actually is.
+        System.out.println(
+            "[VISION] NetworkTables clients currently attached:"
+                + describeNetworkTablesClients());
+    }
+
     public double getTX() {
         return scan().tx;
     }
@@ -123,16 +239,48 @@ public class LimeLight {
     }
 
     /**
-     * Selects the AprilTag pipeline and hands LED control back to it. Safe to call repeatedly.
+     * Puts the camera into a known-good state at boot.
+     *
+     * <p><b>Always clears the fiducial ID filter.</b> That filter is CAMERA-side state: it is set
+     * over NetworkTables and the Limelight keeps honouring it until something clears it. If a
+     * tracking command ever set it and did not get to run its end() — robot disabled mid-command,
+     * code redeployed, brownout — the camera silently keeps reporting only those tag IDs and looks
+     * completely blind to every other tag, across reboots. Clearing on every boot makes that
+     * unrecoverable state impossible.
+     *
+     * <p><b>Only touches the pipeline when explicitly told to.</b> Forcing an index here is a good
+     * way to switch a working camera onto an empty pipeline, so
+     * {@link frc.robot.Constants.LimeLightConstants#APRILTAG_PIPELINE} defaults to -1 meaning
+     * "leave whatever the camera is already on".
      *
      * <p>The lens pose is deliberately NOT pushed from here. It belongs in the Limelight web UI, so
-     * the camera's own 3D solve and {@link frc.robot.Constants.LimeLightConstants} stay in sync
-     * from a single source and a sign mistake in code cannot silently corrupt the camera output.
+     * the camera's own 3D solve and Constants stay in sync from a single source and a sign mistake
+     * in code cannot silently corrupt the camera output.
      */
     public void configureForAprilTags() {
-        table.getEntry("pipeline")
-            .setNumber(frc.robot.Constants.LimeLightConstants.APRILTAG_PIPELINE);
+        clearTagFilter();
+
+        int pipeline = frc.robot.Constants.LimeLightConstants.APRILTAG_PIPELINE;
+        if (pipeline >= 0) {
+            table.getEntry("pipeline").setNumber(pipeline);
+        }
         ledModeEntry.setNumber(0);
+    }
+
+    /**
+     * Every fiducial ID the camera can currently see, ignoring any allowed-tag set we apply.
+     *
+     * <p>This is the difference between "the camera is blind" and "the camera sees tags, but our
+     * filter rejected them" — two problems with completely different fixes.
+     */
+    public int[] getVisibleTagIds() {
+        refreshScanCacheIfNeeded();
+        int count = cachedRawFiducials.length / RAW_FIDUCIAL_STRIDE;
+        int[] ids = new int[count];
+        for (int i = 0; i < count; i++) {
+            ids[i] = (int) cachedRawFiducials[(i * RAW_FIDUCIAL_STRIDE) + RAW_FIDUCIAL_ID_INDEX];
+        }
+        return ids;
     }
 
     public double getPipelineLatencyMs() {
@@ -279,19 +427,86 @@ public class LimeLight {
 
   // commands
 
+  // ---- Network discovery ---------------------------------------------------
+  // A PortForwarder entry is keyed by LOCAL port, so each route needs its own block of local
+  // ports. Forwarding several routes at once costs nothing and means you do not have to guess
+  // which one is alive: try them in order and the first that loads is your working path.
+
+  /** Local port block forwarding to limelight.local (mDNS). Web UI at localhost:5801. */
+  public static final int PORT_BASE_MDNS = 5800;
+
+  /** Local port block forwarding to the team static IP. Web UI at localhost:5811. */
+  public static final int PORT_BASE_STATIC_IP = 5810;
+
+  /** Local port block forwarding over USB-ethernet. Web UI at localhost:5821. */
+  public static final int PORT_BASE_USB = 5820;
+
   /**
-   * Forwards the Limelight's web ports over its USB-ethernet connection.
+   * Makes the camera reachable from a laptop tethered to the roboRIO, over every path at once.
    *
-   * <p>Local ports start at 5810, NOT 5800. A PortForwarder entry is keyed by local port, so when
-   * this used 5800 for index 0 it collided with setupPortForwardingRobotWifi() and whichever ran
-   * second silently replaced the first. Robot.java calls both, so the USB route was thrown away
-   * every boot.
+   * <p>Three routes are forwarded simultaneously because each fails in a different, common way:
    *
-   * <p>Reach the camera over USB at localhost:5810, over the radio at localhost:5800.
+   * <ul>
+   *   <li><b>mDNS</b> ({@code limelight.local}) — the usual advice, but roboRIO mDNS resolution is
+   *       unreliable, and if the name does not resolve the forward is silently dead.
+   *   <li><b>Static IP</b> ({@code 10.TE.AM.11}) — works whenever mDNS does not, which in practice
+   *       is most of the time. Requires the camera to actually be set to that address.
+   *   <li><b>USB-ethernet</b> ({@code 172.29.0.1}) — works with a cable straight into the camera,
+   *       independent of the radio entirely.
+   * </ul>
+   *
+   * <p>This replaces calling setupPortForwardingUSB() and setupPortForwardingRobotWifi()
+   * separately, which both claimed local ports 5800-5809 and so silently overwrote each other.
    */
+  public static void setupPortForwarding() {
+    forwardRange(PORT_BASE_MDNS, "limelight.local");
+
+    String staticIp = staticIpForTeam(RobotController.getTeamNumber());
+    if (staticIp != null) {
+      forwardRange(PORT_BASE_STATIC_IP, staticIp);
+    }
+
+    forwardRange(PORT_BASE_USB, "172.29.0.1");
+
+    System.out.println("=== LIMELIGHT: try these in a browser, first one that loads wins ===");
+    System.out.println("  http://localhost:5801   (via limelight.local / mDNS)");
+    if (staticIp != null) {
+      System.out.printf("  http://localhost:5811   (via static IP %s)%n", staticIp);
+    }
+    System.out.println("  http://localhost:5821   (via USB cable into the Limelight)");
+    System.out.println("  http://limelight.local:5801   (direct, no roboRIO involved)");
+    if (staticIp != null) {
+      System.out.printf("  http://%s:5801   (direct by IP)%n", staticIp);
+    }
+    System.out.println("====================================================================");
+  }
+
+  /**
+   * Standard FRC static address for a device on the team network: 10.TE.AM.11.
+   *
+   * @return the address, or null when the team number is not configured yet
+   */
+  public static String staticIpForTeam(int teamNumber) {
+    if (teamNumber <= 0) {
+      return null;
+    }
+    return String.format("10.%d.%d.11", teamNumber / 100, teamNumber % 100);
+  }
+
+  private static void forwardRange(int localBasePort, String host) {
+    for (int i = 0; i < 10; i++) {
+      PortForwarder.add(localBasePort + i, host, 5800 + i);
+    }
+  }
+
+  /**
+   * @deprecated Use {@link #setupPortForwarding()}, which sets up this route alongside the others
+   *     instead of fighting them for local ports.
+   */
+  @Deprecated
   public static void setupPortForwardingUSB(int usbIndex) {
         String ip = "172.29." + usbIndex + ".1";
-        int basePort = 5810 + (usbIndex * 10);
+        int basePort = PORT_BASE_USB + (usbIndex * 10);
 
         for (int i = 0; i < 10; i++) {
             PortForwarder.add(basePort + i, ip, 5800 + i);
@@ -664,6 +879,19 @@ private void refreshScanCacheIfNeeded() {
         pose);
     cachedRawFiducials = rawFiducialsEntry.getDoubleArray(new double[0]);
     lastScanCacheTimestampSeconds = nowSeconds;
+
+    // The camera bumps tv's change counter every frame it publishes. If that counter stops moving,
+    // the Limelight is not talking to us at all — a different problem from "sees no tags", and one
+    // no amount of aiming the camera will fix.
+    long ntChange = tvEntry.getLastChange();
+    if (ntChange != lastNtChangeMicros) {
+      lastNtChangeMicros = ntChange;
+      lastCameraUpdateSeconds = nowSeconds;
+    }
+    reportConnectionIfDown(nowSeconds);
+    reportAddressOnceConnected(nowSeconds);
+    Logger.recordOutput("Limelight/Connected", isConnected());
+    Logger.recordOutput("Limelight/SecondsSinceUpdate", getSecondsSinceLastUpdate());
 
     Logger.recordOutput("Limelight/Cached/HasTarget", cachedAnyScan.hasTarget);
     Logger.recordOutput("Limelight/Cached/TagID", cachedAnyScan.tagID);

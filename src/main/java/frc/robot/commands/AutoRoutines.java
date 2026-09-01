@@ -112,6 +112,14 @@ public final class AutoRoutines {
         () -> drivebase.drive(Translation2d.kZero, 0.0, false),
         drivebase);
 
+    // With the intake disabled there is nothing to collect, so the drive-out is skipped entirely
+    // rather than trundling around scooping air and eating seconds of the autonomous period.
+    if (!frc.robot.Constants.IntakeConstants.ENABLED) {
+      return Commands.runOnce(
+          () -> System.out.println("AUTO_SKIP,step=collectFuel,reason=intake_disabled"))
+          .withName("Auto.collectFuel(skipped)");
+    }
+
     return Commands.deadline(
         Commands.waitSeconds(seconds),
         drive,

@@ -158,6 +158,23 @@ public class IntakeSubsystem extends SubsystemBase {
       setIntakeHold();
     }).withName("Intake.BackFeedAndRoll");
   }
+  /**
+   * Holds the intake completely inert: both motors driven to zero, every loop.
+   *
+   * <p>Used as the default command while {@link Constants.IntakeConstants#ENABLED} is false.
+   *
+   * <p>This has to actively write zeros rather than simply leaving the subsystem unbound. A SparkMax
+   * keeps applying its last commanded output until something tells it otherwise, so removing the
+   * bindings alone would leave the intake running at whatever it was doing when the last command
+   * ended — the opposite of disabled.
+   */
+  public Command disabledCommand() {
+    return Commands.run(() -> {
+      pivotMotor.set(0);
+      rollerMotor.set(0);
+    }, this).ignoringDisable(true).withName("Intake.DISABLED");
+  }
+
   public Command manualPivot(DoubleSupplier pSupplier) {
     return Commands.run(() -> {
         double input = pSupplier.getAsDouble();

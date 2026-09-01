@@ -61,7 +61,9 @@ public class HubLineupCommand extends Command {
     gaveUp = false;
     omegaLimiter.reset(0.0);
     forwardLimiter.reset(0.0);
-    limelight.setTagFilter(FieldConstants.hubTagIds());
+    // No camera-side tag filter: observeHub() already filters in software, and the hardware filter
+    // persisted on the Limelight whenever this command did not reach end().
+    limelight.clearTagFilter();
   }
 
   @Override

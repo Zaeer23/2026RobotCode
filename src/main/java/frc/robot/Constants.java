@@ -141,8 +141,18 @@ public final class Constants
   } // temporary value, will need to be updated when hood is implemented
   public static class IntakeConstants {
     // SparkFlex controlling the intake flywheel
-    public static final int kPivotMotorId = 42;  
+    public static final int kPivotMotorId = 42;
     public static final int kRollerMotorId = 41; // temporary values, will need to be updated when intake is implemented
+
+    /**
+     * Master switch for the intake. TEMPORARILY DISABLED — set back to true to restore it.
+     *
+     * <p>While false, nothing anywhere commands the intake: the operator bindings are not
+     * registered, the default command actively holds both motors at zero, the pivot bounce is
+     * dropped from the feed sequence, and autonomous skips the collection step. Flipping this one
+     * value back to true restores every one of those in place.
+     */
+    public static final boolean ENABLED = false;
   }
 
     // Limelight values for limelight
@@ -150,8 +160,15 @@ public final class Constants
       /** NetworkTables name of the camera. */
       public static final String NAME = "limelight";
 
-      /** AprilTag pipeline index configured in the Limelight web UI. */
-      public static final int APRILTAG_PIPELINE = 0;
+      /**
+       * AprilTag pipeline index, or -1 to leave the camera on whatever pipeline it is already set
+       * to.
+       *
+       * <p>Defaults to -1 on purpose. Hardcoding an index means every boot yanks the camera onto
+       * that pipeline, and if it is not actually the AprilTag one the Limelight goes blind with no
+       * obvious cause. Only set a real number here once you have confirmed the index in the web UI.
+       */
+      public static final int APRILTAG_PIPELINE = -1;
 
       // ---- Mounting pose (MEASURE THESE ON THE REAL ROBOT) -------------------
       // Lens position in the robot frame: +X forward, +Y left, +Z up. The camera is bolted to the
