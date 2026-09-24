@@ -4,6 +4,7 @@ import static edu.wpi.first.units.Units.Degrees;
 import static edu.wpi.first.units.Units.RPM;
 
 import java.util.Map;
+import java.util.Optional;
 
 import edu.wpi.first.cscore.VideoSource;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -23,6 +24,9 @@ import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import frc.robot.Constants;
 import frc.robot.subsystems.ProjectileMotion.ShotSolution;
 import frc.robot.subsystems.swervedrive.SwerveSubsystem;
+import frc.robot.vision.AprilTagCamera;
+import frc.robot.vision.TagObservation;
+
 
 public class ShuffleboardManager {
 
@@ -72,7 +76,7 @@ public class ShuffleboardManager {
     private static final String CONTROLS_TAB = "2026 Controls";
     private static final String DASHBOARD_BUILD = "2026_MATCH_V3";
 
-    private final LimeLight limelight;
+    private final AprilTagCamera camera;
     private final Superstructure superstructure;
     private final SwerveSubsystem drivebase;
     private final TurretSubsystem turret;
@@ -142,13 +146,13 @@ public class ShuffleboardManager {
     private final SimpleWidget entrySelectedStartPose;
 
     public ShuffleboardManager(
-            LimeLight limelight,
+            AprilTagCamera camera,
             Superstructure superstructure,
             SwerveSubsystem drivebase,
             TurretSubsystem turret,
             VideoSource driverCamera) {
 
-        this.limelight = limelight;
+        this.camera = camera;
         this.superstructure = superstructure;
         this.drivebase = drivebase;
         this.turret = turret;
@@ -294,11 +298,15 @@ public class ShuffleboardManager {
                 .withPosition(0, 0)
                 .withSize(7, 5);
 
-        matchTab.add("Driver Camera", this.driverCamera)
-                .withWidget(BuiltInWidgets.kCameraStream)
-                .withPosition(7, 0)
-                .withSize(5, 3)
-                .withProperties(Map.of("Show crosshair", false, "Show controls", false, "Rotation", "NONE"));
+        // Null when the driver camera is disabled. Adding a null source throws, so the widget is
+        // simply left off the tab rather than occupying space with a dead stream.
+        if (this.driverCamera != null) {
+            matchTab.add("Driver Camera", this.driverCamera)
+                    .withWidget(BuiltInWidgets.kCameraStream)
+                    .withPosition(7, 0)
+                    .withSize(5, 3)
+                    .withProperties(Map.of("Show crosshair", false, "Show controls", false, "Rotation", "NONE"));
+        }
 
         ShuffleboardLayout matchVision = matchTab
                 .getLayout("Driver Overlay", BuiltInLayouts.kGrid)
@@ -422,16 +430,18 @@ public class ShuffleboardManager {
         entryShooterActualRPM.getEntry().setDouble(round1(shooterRPM));
         entryHoodAngleDeg.getEntry().setDouble(round1(hoodDeg));
 
-        LimeLight.AprilTagScan directScan = limelight.scanDirect();
-        boolean hasTarget = directScan.hasTarget;
+        Optional<TagObservation> bestTag = camera.getBestTag();
+        boolean hasTarget = bestTag.isPresent();
         entryLLHasTarget.getEntry().setBoolean(hasTarget);
-        entryLLTargetCount.getEntry().setInteger(hasTarget ? 1 : 0);
-        entryLLTX.getEntry().setDouble(round2(directScan.tx));
-        entryLLTY.getEntry().setDouble(round2(directScan.ty));
-        entryLLTagID.getEntry().setInteger(directScan.tagID);
-        entryLLDistance.getEntry().setDouble(round2(directScan.distance));
-        entryLLLatencyMs.getEntry().setDouble(round1(directScan.latencyMs));
-        entryLLStreamState.getEntry().setString(hasTarget ? "TRACKING" : "SEARCHING");
+        entryLLTargetCount.getEntry().setInteger(camera.getTags().size());
+        entryLLTX.getEntry().setDouble(round2(bestTag.map(t -> t.txDegrees).orElse(0.0)));
+        entryLLTY.getEntry().setDouble(round2(bestTag.map(t -> t.tyDegrees).orElse(0.0)));
+        entryLLTagID.getEntry().setInteger(bestTag.map(t -> t.id).orElse(-1));
+        entryLLDistance.getEntry().setDouble(
+                round2(bestTag.map(t -> t.distanceToCameraMeters).orElse(0.0)));
+        entryLLLatencyMs.getEntry().setDouble(round1(camera.getLatencySeconds() * 1000.0));
+        // Says which of the three failures it is, rather than a single ambiguous "SEARCHING".
+        entryLLStreamState.getEntry().setString(camera.getStatus());
 
         if (activeSolution != null) {
             entryShotValid.getEntry().setBoolean(activeSolution.valid);
@@ -458,7 +468,7 @@ public class ShuffleboardManager {
         entryReadyToShoot.getEntry().setBoolean(shooterReady && turretReady && hoodReady && hasTarget);
 
         field.setRobotPose(pose);
-        updateFieldObjects(directScan, pose);
+        updateFieldObjects(bestTag, pose);
         entryRobotX.getEntry().setDouble(round2(pose.getX()));
         entryRobotY.getEntry().setDouble(round2(pose.getY()));
         entryRobotHeading.getEntry().setDouble(round1(pose.getRotation().getDegrees()));
@@ -471,12 +481,13 @@ public class ShuffleboardManager {
         entryMatchHasTarget.getEntry().setBoolean(hasTarget);
         entryMatchReady.getEntry().setBoolean(shooterReady && turretReady && hoodReady && hasTarget);
         entryMatchTurretHealth.getEntry().setBoolean(turret.isTrackingHealthy());
-        entryMatchTagId.getEntry().setInteger(directScan.tagID);
-        entryMatchStream.getEntry().setString(hasTarget ? "TRACKING" : "SEARCHING");
-        entryMatchTx.getEntry().setDouble(round2(directScan.tx));
-        entryMatchTy.getEntry().setDouble(round2(directScan.ty));
-        entryMatchDistance.getEntry().setDouble(round2(directScan.distance));
-        entryMatchLatency.getEntry().setDouble(round1(directScan.latencyMs));
+        entryMatchTagId.getEntry().setInteger(bestTag.map(t -> t.id).orElse(-1));
+        entryMatchStream.getEntry().setString(camera.getStatus());
+        entryMatchTx.getEntry().setDouble(round2(bestTag.map(t -> t.txDegrees).orElse(0.0)));
+        entryMatchTy.getEntry().setDouble(round2(bestTag.map(t -> t.tyDegrees).orElse(0.0)));
+        entryMatchDistance.getEntry().setDouble(
+                round2(bestTag.map(t -> t.distanceToCameraMeters).orElse(0.0)));
+        entryMatchLatency.getEntry().setDouble(round1(camera.getLatencySeconds() * 1000.0));
         entryMatchTurret.getEntry().setDouble(round1(turretDeg));
         entryMatchShooter.getEntry().setDouble(round1(shooterRPM));
         entryMatchSpeed.getEntry().setDouble(round2(Math.hypot(speeds.vxMetersPerSecond, speeds.vyMetersPerSecond)));
@@ -491,22 +502,28 @@ public class ShuffleboardManager {
         update(null);
     }
 
-    private void updateFieldObjects(LimeLight.AprilTagScan scan, Pose2d robotPose) {
+    private void updateFieldObjects(Optional<TagObservation> bestTag, Pose2d robotPose) {
         field.getObject("Robot Ghost").setPose(robotPose);
-        if (!scan.hasTarget || scan.distance <= 0.0) {
+        field.getObject("Selected Start").setPose(getSelectedStartPosition().getPose());
+
+        if (bestTag.isEmpty() || bestTag.get().distanceToCameraMeters <= 0.0) {
             field.getObject("Limelight Target").setPoses();
             field.getObject("Aim Line").setPoses();
-            field.getObject("Selected Start").setPose(getSelectedStartPosition().getPose());
             return;
         }
 
-        double targetHeadingRadians = robotPose.getRotation().getRadians() + Math.toRadians(scan.tx);
-        double targetX = robotPose.getX() + (scan.distance * Math.cos(targetHeadingRadians));
-        double targetY = robotPose.getY() + (scan.distance * Math.sin(targetHeadingRadians));
-        Pose2d targetPose = new Pose2d(targetX, targetY, robotPose.getRotation());
+        TagObservation tag = bestTag.get();
+        // tx is POSITIVE to the right, while field headings are CCW-positive, so it is negated to
+        // place the marker on the correct side of the robot.
+        double targetHeadingRadians =
+                robotPose.getRotation().getRadians() - Math.toRadians(tag.txDegrees);
+        double range = tag.distanceToCameraMeters;
+        Pose2d targetPose = new Pose2d(
+                robotPose.getX() + (range * Math.cos(targetHeadingRadians)),
+                robotPose.getY() + (range * Math.sin(targetHeadingRadians)),
+                robotPose.getRotation());
         field.getObject("Limelight Target").setPose(targetPose);
         field.getObject("Aim Line").setPoses(robotPose, targetPose);
-        field.getObject("Selected Start").setPose(getSelectedStartPosition().getPose());
     }
 
     private void initializeFieldDecor() {

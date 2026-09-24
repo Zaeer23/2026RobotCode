@@ -23,13 +23,10 @@ import edu.wpi.first.wpilibj2.command.button.Trigger;
 import frc.robot.Constants.OperatorConstants;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
-import frc.robot.commands.AutoRoutines;
-import frc.robot.commands.HubLineupCommand;
-import frc.robot.commands.LimeLightRunner;
 import frc.robot.commands.ShootingCommand;
 import frc.robot.subsystems.HopperSubsystem;
 import frc.robot.subsystems.IntakeSubsystem;
-import frc.robot.subsystems.LimeLight;
+import frc.robot.vision.AprilTagCamera;
 import frc.robot.subsystems.swervedrive.SwerveSubsystem;
 import java.io.File;
 import swervelib.SwerveInputStream;
@@ -53,6 +50,9 @@ import static edu.wpi.first.units.Units.Degrees;
 public class RobotContainer
 {
   private static final double ALT_TURRET_MANUAL_SPEED = 0.18;
+
+  /** Driver USB camera. TEMPORARILY DISABLED — set true to bring the stream back. */
+  private static final boolean DRIVER_CAMERA_ENABLED = false;
 
   // Replace with CommandPS4Controller or CommandJoystick if needed
   final         CommandXboxController driverXbox = new CommandXboxController(0);
@@ -111,7 +111,7 @@ public class RobotContainer
    * The container for the robot. Contains subsystems, OI devices, and commands.
    */
   // Declare the Limelight subsystem
-private final LimeLight m_limelight = new LimeLight("limelight");
+private final AprilTagCamera m_camera = new AprilTagCamera(Constants.LimeLightConstants.NAME);
    // Define the components (You may need to add imports for these)
 private final ShooterSubsystem m_shooter = new ShooterSubsystem();
 private final TurretSubsystem m_turret   = new TurretSubsystem();
@@ -125,10 +125,10 @@ private final UsbCamera m_driverCamera = startDriverCamera();
 
 // Create the Superstructure instance
 private final Superstructure m_superstructure = new Superstructure(
-    m_shooter, m_turret, m_hood, m_intake, m_hopper, m_kicker, m_limelight
+    m_shooter, m_turret, m_hood, m_intake, m_hopper, m_kicker, m_camera
 );
 private final ShuffleboardManager m_shuffleboard = new ShuffleboardManager(
-    m_limelight, m_superstructure, drivebase, m_turret, m_driverCamera
+    m_camera, m_superstructure, drivebase, m_turret, m_driverCamera
 );
 
   private final SendableChooser<Command> autoChooser = new SendableChooser<>();
@@ -146,16 +146,10 @@ private final ShuffleboardManager m_shuffleboard = new ShuffleboardManager(
 
   private void configureAutoChooser()
   {
+    // Vision-driven autos are gone along with the old targeting stack. They come back once tag
+    // detection is proven on the real robot; shipping an auto that steers off a camera we cannot
+    // yet trust would just move the failure somewhere harder to debug.
     autoChooser.setDefaultOption(
-        "Shoot + Collect + Shoot",
-        AutoRoutines.shootCollectShoot(m_superstructure, m_turret, m_shooter, m_limelight, drivebase));
-    autoChooser.addOption(
-        "Shoot preload + leave",
-        AutoRoutines.shootAndLeave(m_superstructure, m_turret, m_shooter, m_limelight, drivebase));
-    autoChooser.addOption(
-        "Shoot preload only",
-        AutoRoutines.shootPreloadOnly(m_superstructure, m_turret, m_shooter, m_limelight, drivebase));
-    autoChooser.addOption(
         "Blind timed shoot (no vision)",
         new ShootingCommand(m_shooter, m_kicker, m_hopper));
     autoChooser.addOption("Do nothing", Commands.none());
@@ -173,20 +167,13 @@ private final ShuffleboardManager m_shuffleboard = new ShuffleboardManager(
     // Keeping them apart means the driver can reposition without firing, and the operator can fire
     // without the robot driving itself out from under them.
 
-    // TRACK AND SHOOT — aim, spin, and feed when ready. Chassis stays with the driver.
-    new Trigger(() -> isCurrentShooterProfile() && shooterXbox.y().getAsBoolean())
-        .whileTrue(m_superstructure.trackAndShootCommand(drivebase));
+    // Automatic aiming and lineup were removed with the old targeting stack and come back once tag
+    // detection is verified on the robot. Only the range-based flywheel speed survives, below.
 
-    // LINEUP AND SHOOT — drive to range first, then the same. Borrows the drivebase only until the
-    // lineup settles, then releases it back to the driver.
-    new Trigger(() -> isCurrentShooterProfile() && shooterXbox.leftBumper().getAsBoolean())
-        .whileTrue(m_superstructure.autoShootCommand(drivebase));
-
-    // AIM ONLY — turret tracks and flywheel spins, but never feeds. For the operator who wants to
-    // pick the exact moment to fire with the manual feed on A.
+    // SPIN FOR RANGE — sets flywheel speed from the measured hub distance. The operator still aims
+    // the turret and still picks the moment to fire with the manual feed on A.
     new Trigger(() -> isCurrentShooterProfile() && shooterXbox.rightBumper().getAsBoolean())
-        .whileTrue(m_superstructure.limelightShootCommand(drivebase));
-    driverXbox.y().whileTrue(m_limelight.alignCommand(drivebase));
+        .whileTrue(m_superstructure.shootAtMeasuredRangeCommand());
     new Trigger(() -> isCurrentShooterProfile() && shooterXbox.povLeft().getAsBoolean())
         .onTrue(m_shooter.decreaseLimelightPowerForLastShotCommand());
     new Trigger(() -> isCurrentShooterProfile() && shooterXbox.povRight().getAsBoolean())
@@ -268,26 +255,22 @@ private final ShuffleboardManager m_shuffleboard = new ShuffleboardManager(
   }
   
   /**
-   * Vision-assisted drivebase moves.
+   * Vision wiring.
    *
-   * <p>Both are {@code whileTrue} on a HELD button, and neither is a default command. The drivebase
-   * default stays plain driver control, so releasing the button always hands the robot straight
-   * back to the driver — and the lineup ends by itself once it settles.
+   * <p>Currently nothing drives a mechanism from the camera. {@link AprilTagCamera} is registered
+   * as a subsystem, so its {@code periodic()} reads tags and publishes telemetry every loop with no
+   * button press needed — open the {@code AprilTag/} keys on the dashboard to see what it sees.
    *
-   * <p>This method previously constructed a {@link LimeLightRunner} and called {@code execute()} on
-   * it directly, exactly once, at startup. A Command has to be scheduled to run: calling execute()
-   * by hand fires a single loop iteration during init, ignores the drivebase requirement it
-   * declared, and then never runs again. {@link HubLineupCommand} supersedes it.
+   * <p>Note what is NOT here: no pipeline selection and no tag ID filter pushed to the camera.
+   * Both of those are hardware-side state that persists across reboots, and both previously made a
+   * healthy camera look blind. Camera configuration belongs in the Limelight web UI.
    */
   public void configureLimeLightKeys()
   {
-    m_limelight.configureForAprilTags();
-
-    // Auto line up on the hub: squares up and drives to the calibrated shooting range.
-    driverXbox.rightBumper().whileTrue(m_superstructure.hubLineupCommand(drivebase));
-
-    // Line up on the TOWER tags for the climb.
-    driverXbox.start().whileTrue(m_superstructure.climbBarAlignCommand(drivebase));
+    // Driver POV-RIGHT dumps every key the camera publishes to the console. Works while disabled,
+    // which is when you actually want it: park the robot in front of a tag, press it, read the
+    // output. POV-right is used because every face button on this controller is already taken.
+    driverXbox.povRight().onTrue(m_camera.dumpDiagnosticsCommand());
   }
 
   /**
@@ -390,8 +373,21 @@ private final ShuffleboardManager m_shuffleboard = new ShuffleboardManager(
     m_shuffleboard.update();
   }
 
+  /**
+   * Brings up the driver camera, or returns null while it is switched off.
+   *
+   * <p>TEMPORARILY DISABLED via {@link #DRIVER_CAMERA_ENABLED}. Starting an automatic capture
+   * claims a USB device, spawns an encoder thread and streams continuously over the radio, so
+   * turning it off is worth real CPU and bandwidth while debugging something else. Flip the flag
+   * back to true to restore it; the Shuffleboard widget reappears with it.
+   */
   private UsbCamera startDriverCamera()
   {
+    if (!DRIVER_CAMERA_ENABLED) {
+      System.out.println("[CAMERA] Driver camera DISABLED (RobotContainer.DRIVER_CAMERA_ENABLED).");
+      return null;
+    }
+
     UsbCamera camera = CameraServer.startAutomaticCapture("DriverCam", 0);
     camera.setResolution(320, 240);
     camera.setFPS(20);

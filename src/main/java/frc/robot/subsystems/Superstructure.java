@@ -18,10 +18,9 @@ import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.wpilibj2.command.button.Trigger;
 import frc.robot.Constants;
-import frc.robot.FieldConstants;
-import frc.robot.commands.HubLineupCommand;
-import frc.robot.commands.TurretTrackCommand;
+import frc.robot.Constants.TurretConstants;
 import frc.robot.subsystems.swervedrive.SwerveSubsystem;
+import frc.robot.vision.AprilTagCamera;
 
 
 /**
@@ -44,7 +43,7 @@ public class Superstructure extends SubsystemBase {
   public final IntakeSubsystem intake;
   public final HopperSubsystem hopper;
   public final KickerSubsystem kicker;
-  public final LimeLight limelight;
+  public final AprilTagCamera camera;
 
   // Tolerance for "at setpoint" checks
   private static final AngularVelocity SHOOTER_TOLERANCE = RPM.of(100);
@@ -73,14 +72,14 @@ public class Superstructure extends SubsystemBase {
   // Default aim point is red hub
 
   public Superstructure(ShooterSubsystem shooter, TurretSubsystem turret, HoodSubsystem hood, IntakeSubsystem intake,
-      HopperSubsystem hopper, KickerSubsystem kicker, LimeLight limelight) {
+      HopperSubsystem hopper, KickerSubsystem kicker, AprilTagCamera camera) {
     this.shooter = shooter;
     this.turret = turret;
     this.hood = hood;
     this.intake = intake;
     this.hopper = hopper;
     this.kicker = kicker;
-    this.limelight = limelight;
+    this.camera = camera;
 
     // Create triggers for checking if mechanisms are at their targets
     this.isShooterAtSpeed = new Trigger(
@@ -281,146 +280,38 @@ public Command manualTurretControl(Supplier<Double> speedSupplier) {
     return kicker.stopCommand().withName("Superstructure.kickerStop");
   }
 
-  //limelight commands
+  // ---- Vision -------------------------------------------------------------
+  //
+  // The whole AprilTag targeting stack was removed and is being rebuilt from the ground up. What
+  // exists right now is deliberately only the reading layer: AprilTagCamera reports which tags are
+  // visible and how far away they are, and nothing steers a mechanism from it yet. Aiming,
+  // lining up and vision-driven shooting get layered back on once tag detection is proven on the
+  // real robot.
 
-  public Command limelightAlignCommand(SwerveSubsystem drivebase) {
-    return limelight.alignCommand(drivebase).withName("Superstructure.limelightAlign");
+  /** Range from the shooter exit to the alliance HUB, or -1 when no hub tag is visible. */
+  public double getHubDistanceMeters() {
+    return camera.getBestHubTag()
+        .map(tag -> Math.max(0.0,
+            tag.distanceToCameraMeters - TurretConstants.SHOOTER_EXIT_RADIUS_METERS))
+        .orElse(-1.0);
+  }
+
+  /** True when a HUB tag for this alliance is currently in view. */
+  public boolean seesHub() {
+    return camera.getBestHubTag().isPresent();
   }
 
   /**
-   * Lines up on the TOWER tags for climbing.
+   * Spins the flywheel for the currently measured hub range.
    *
-   * <p>Deferred so the alliance-correct tag set resolves when the command is scheduled, not when it
-   * is constructed at boot — the driver station has not reported an alliance yet at that point.
+   * <p>Aiming is the operator's job for now; this only sets the speed. The turret is not driven
+   * from vision until tag detection is trusted.
    */
-  public Command climbBarAlignCommand(SwerveSubsystem drivebase) {
-    return Commands.defer(
-        () -> limelight.alignToTagsCommand(drivebase, FieldConstants.towerTagIds()),
-        Set.of(drivebase))
-        .withName("Superstructure.climbBarAlign");
+  public Command shootAtMeasuredRangeCommand() {
+    return shooter.setSpeedForDistance(this::getHubDistanceMeters)
+        .withName("Superstructure.shootAtMeasuredRange");
   }
 
-  /**
-   * Drives the chassis to the calibrated shooting spot on the hub.
-   *
-   * <p>Bind to a HELD button. It owns the drivebase while it runs, so as a default command it would
-   * leave the driver unable to move.
-   */
-  public Command hubLineupCommand(SwerveSubsystem drivebase) {
-    return new HubLineupCommand(drivebase, limelight).withName("Superstructure.hubLineup");
-  }
-
-  /**
-   * Aims and spins from vision without moving the chassis, so the driver keeps the drivebase and
-   * fires manually.
-   */
-  public Command limelightShootCommand(SwerveSubsystem drivebase) {
-    return Commands.parallel(
-        shooter.setSpeedFromLimelight(limelight, drivebase),
-        trackHubTagsCommand(drivebase))
-        .withName("Superstructure.limelightShoot");
-  }
-
-  /**
-   * TRACK AND SHOOT. Aims, spins, and fires without ever touching the drivebase.
-   *
-   * <p>The driver keeps full control of the chassis throughout, so this is the one to use while
-   * dodging defense or shooting from a spot the driver picked. Deliberately distinct from
-   * {@link #autoShootCommand}, which moves the robot.
-   */
-  public Command trackAndShootCommand(SwerveSubsystem drivebase) {
-    Command aimAndSpin = Commands.parallel(
-        trackHubTagsCommand(drivebase),
-        shooter.setSpeedFromLimelight(limelight, drivebase));
-
-    Command fireWhenReady = Commands.sequence(
-        Commands.waitUntil(isVisionReadyToShoot).withTimeout(2.0),
-        feedAllCommand());
-
-    return Commands.deadline(fireWhenReady, aimAndSpin)
-        .withName("Superstructure.trackAndShoot");
-  }
-
-  /**
-   * LINEUP AND SHOOT. Drives to the calibrated range first, then aims, spins, and fires.
-   *
-   * <p>The lineup runs only until it settles and then releases the chassis, so holding the button
-   * does not pin the robot in place for the rest of the match.
-   */
-  public Command autoShootCommand(SwerveSubsystem drivebase) {
-    Command aimAndSpin = Commands.parallel(
-        trackHubTagsCommand(drivebase),
-        shooter.setSpeedFromLimelight(limelight, drivebase));
-
-    Command lineupThenFire = Commands.sequence(
-        new HubLineupCommand(drivebase, limelight),
-        Commands.waitUntil(isVisionReadyToShoot).withTimeout(1.5),
-        feedAllCommand());
-
-    return Commands.deadline(lineupThenFire, aimAndSpin)
-        .withName("Superstructure.autoShoot");
-  }
-
-  /**
-   * Closed-loop turret tracking on the alliance HUB.
-   *
-   * <p>The implementation moved to {@link TurretTrackCommand}. The old version lived here as a
-   * hand-rolled open-loop tx chase with a minimum-output floor, which hunted around the target and
-   * derived its setpoint from the turret's own position. See that class for the details.
-   */
-  public Command trackTargetCommand(LimeLight limelight) {
-    return new TurretTrackCommand(turret, limelight, null).withName("Superstructure.trackTarget");
-  }
-
-  /** Closed-loop turret tracking with chassis yaw-rate latency compensation. */
-  public Command trackHubTagsCommand(SwerveSubsystem drivebase) {
-    return new TurretTrackCommand(turret, limelight, drivebase)
-        .withName("Superstructure.trackHubTags");
-  }
-
-  /**
-   * Vision tracking that yields to the operator: whenever the manual stick is pushed past its
-   * deadband the turret follows the stick, and it returns to tracking the moment they let go.
-   */
-  public Command turretAssistCommand(Supplier<Double> manualInputSupplier) {
-    Command track = new TurretTrackCommand(turret, limelight, null);
-    return Commands.run(
-        () -> {
-          double manualInput = manualInputSupplier.get();
-          if (Math.abs(manualInput) > MANUAL_TURRET_DEADBAND) {
-            if (trackingActive) {
-              track.end(true);
-              trackingActive = false;
-            }
-            turret.setOpenLoop(Math.copySign(manualInput * manualInput, manualInput));
-            return;
-          }
-
-          if (!trackingActive) {
-            track.initialize();
-            trackingActive = true;
-          }
-          track.execute();
-        },
-        turret)
-        .finallyDo(interrupted -> {
-          if (trackingActive) {
-            track.end(true);
-            trackingActive = false;
-          }
-          turret.setOpenLoop(0.0);
-          turret.clearTrackingTelemetry();
-        })
-        .withName("Superstructure.turretAssist");
-  }
-
-
-  /**
-   * Runs the hopper and kicker to feed the shooter.
-   *
-   * <p>The pivot bounce is dropped while the intake is disabled. Feeding is a shooter action, so it
-   * still needs to work with the intake out of service — it just stops jogging the pivot to do it.
-   */
   public Command feedAllCommand() {
     if (!Constants.IntakeConstants.ENABLED) {
       return Commands.parallel(
@@ -547,18 +438,19 @@ public Command setShooterPercent(Supplier<Double> percentSupplier) {
     return shooter.getTangentialVelocity();
   }
   
+  /** True when the camera can see any AprilTag at all. */
   public boolean limelightHasTarget() {
-    return limelight.hasTarget();
+    return camera.hasAnyTag();
   }
 
-  public double getLimeLightApril_HorizontalAngle(LimeLight limelight)
-  {
-    return limelight.getTX();
+  /** Horizontal angle to the nearest tag, degrees, POSITIVE to the right. 0 when none visible. */
+  public double getNearestTagTxDegrees() {
+    return camera.getBestTag().map(tag -> tag.txDegrees).orElse(0.0);
   }
 
-  public double getLimeLightApril_VerticalAngle(LimeLight limelight)
-  {
-    return limelight.getTY();
+  /** Vertical angle to the nearest tag, degrees, POSITIVE up. 0 when none visible. */
+  public double getNearestTagTyDegrees() {
+    return camera.getBestTag().map(tag -> tag.tyDegrees).orElse(0.0);
   }
 
 

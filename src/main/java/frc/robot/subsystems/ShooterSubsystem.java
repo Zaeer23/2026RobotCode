@@ -1,6 +1,6 @@
 package frc.robot.subsystems;
 
-import java.util.Set;
+import java.util.function.DoubleSupplier;
 import java.util.function.Supplier;
 
 import org.littletonrobotics.junction.Logger;
@@ -31,10 +31,7 @@ import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.wpilibj2.command.WaitCommand;
-import frc.robot.FieldConstants;
 import frc.robot.Constants.ShooterConstants;
-import frc.robot.subsystems.VisionTargeting.TargetObservation;
-import frc.robot.subsystems.swervedrive.SwerveSubsystem;
 import yams.gearing.GearBox;
 import yams.gearing.MechanismGearing;
 import yams.mechanisms.config.FlyWheelConfig;
@@ -52,7 +49,7 @@ import yams.motorcontrollers.local.SparkWrapper;
  * <h2>How shot power is chosen</h2>
  *
  * <ol>
- *   <li>{@link VisionTargeting} gives the range from the ball exit point to the hub.
+ *   <li>A caller supplies the range from the ball exit point to the goal.
  *   <li>{@link ProjectileMotion#flywheelRpmForDistance} turns that into an RPM using projectile
  *       physics scaled by one efficiency factor derived from the team's measured reference shot.
  *   <li>Any per-distance trim the drivers have dialled in is added.
@@ -186,55 +183,38 @@ public class ShooterSubsystem extends SubsystemBase {
         && Math.abs(getSpeed().in(RPM) - commandedShotRpm) <= ShooterConstants.READY_TOLERANCE_RPM;
   }
 
-  public Command setSpeedFromLimelight(LimeLight limelight) {
-    return setSpeedFromLimelight(limelight, null, FieldConstants::hubTagIds);
-  }
-
-  public Command setSpeedFromLimelight(LimeLight limelight, SwerveSubsystem drivebase) {
-    return setSpeedFromLimelight(limelight, drivebase, FieldConstants::hubTagIds);
-  }
-
-  public Command setSpeedFromLimelight(
-      LimeLight limelight, SwerveSubsystem drivebase, Set<Integer> allowedTagIds) {
-    return setSpeedFromLimelight(limelight, drivebase, () -> allowedTagIds);
-  }
-
   /**
-   * Continuously commands the flywheel to whatever speed the current vision range calls for.
+   * Spins the flywheel to whatever speed the supplied range calls for, updated every loop.
    *
-   * @param limelight     camera to range off
-   * @param drivebase     used for latency compensation; may be null
-   * @param allowedTagIds supplier of the tags to accept, evaluated each cycle so the alliance can
-   *                      arrive after the command was constructed
+   * <p>Takes a distance rather than a camera on purpose. The shot model cares about one number —
+   * metres from the ball exit to the goal — and nothing about how that number was measured. Keeping
+   * vision out of this class means the shot table can be exercised from a tape measure, a
+   * simulation, or a dashboard slider, and a broken camera can never masquerade as a shooter bug.
+   *
+   * @param shooterDistanceMetersSupplier range from the shooter exit to the goal, or a
+   *                                      non-positive value when it is unknown
    */
-  public Command setSpeedFromLimelight(
-      LimeLight limelight,
-      SwerveSubsystem drivebase,
-      Supplier<Set<Integer>> allowedTagIds) {
+  public Command setSpeedForDistance(DoubleSupplier shooterDistanceMetersSupplier) {
     return shooter.setSpeed(() -> {
       double nowSeconds = Timer.getFPGATimestamp();
-      Set<Integer> tags = allowedTagIds == null ? FieldConstants.hubTagIds() : allowedTagIds.get();
-      TargetObservation observation = limelight.observe(tags, drivebase);
+      double measuredDistanceMeters = shooterDistanceMetersSupplier.getAsDouble();
 
-      if (!observation.valid) {
-        Logger.recordOutput("Shooter/LimelightShotValid", false);
-        Logger.recordOutput("Shooter/LimelightShotMessage", observation.message);
-        Logger.recordOutput("Shooter/LimelightDistanceMeters", 0.0);
-        Logger.recordOutput("Shooter/LimelightModelRPM", 0.0);
-        Logger.recordOutput("Shooter/LimelightCommandedRPM", 0.0);
-        Logger.recordOutput("Shooter/LimelightTargetTagID", -1);
-        maybeReportInvalidTarget(nowSeconds, observation.message);
+      if (!(measuredDistanceMeters > 0.0) || !Double.isFinite(measuredDistanceMeters)) {
+        Logger.recordOutput("Shooter/ShotValid", false);
+        Logger.recordOutput("Shooter/ShotMessage", "no range available");
+        Logger.recordOutput("Shooter/CommandedRPM", 0.0);
+        maybeReportInvalidTarget(nowSeconds, "no range available");
         wasLimelightShotValidLastCycle = false;
         commandedShotRpm = 0.0;
         return RPM.of(0);
       }
 
-      double measuredDistanceMeters = observation.shooterDistanceMeters;
       double distanceMeters = measuredDistanceMeters;
-      boolean distanceOutOfRange = !observation.isWithinShootingRange();
+      boolean distanceOutOfRange =
+          distanceMeters < ShooterConstants.MIN_VALID_DISTANCE_METERS
+              || distanceMeters > ShooterConstants.MAX_VALID_DISTANCE_METERS;
       if (distanceOutOfRange) {
-        // Rather than firing on a nonsense range, fall back to the one distance we know is
-        // calibrated. The flag is logged so this is obvious after the match.
+        // Rather than firing on a nonsense range, fall back to the one distance known calibrated.
         distanceMeters = ShooterConstants.REFERENCE_DISTANCE_METERS;
       }
 
@@ -244,47 +224,37 @@ public class ShooterSubsystem extends SubsystemBase {
 
       TableEstimate tableEstimate = estimateFromShotTable(distanceMeters, modelRpm);
       double rangedRecommended = MathUtil.clamp(
-          tableEstimate.recommendedRpm,
-          tableEstimate.rangeMinRpm,
-          tableEstimate.rangeMaxRpm);
+          tableEstimate.recommendedRpm, tableEstimate.rangeMinRpm, tableEstimate.rangeMaxRpm);
       double commandedRPM = MathUtil.clamp(
           rangedRecommended, ShooterConstants.MIN_SHOT_RPM, ShooterConstants.MAX_SHOT_RPM);
 
-      Logger.recordOutput("Shooter/LimelightShotValid", true);
-      Logger.recordOutput("Shooter/LimelightShotMessage",
+      Logger.recordOutput("Shooter/ShotValid", true);
+      Logger.recordOutput("Shooter/ShotMessage",
           tableEstimate.fromTable ? "Learned shot table" : "Physics model anchored on reference shot");
-      Logger.recordOutput("Shooter/LimelightModelRPM", modelRpm);
-      Logger.recordOutput("Shooter/LimelightCommandedRPM", commandedRPM);
-      Logger.recordOutput("Shooter/LimelightDistanceMeters", distanceMeters);
-      Logger.recordOutput("Shooter/LimelightMeasuredDistanceMeters", measuredDistanceMeters);
-      Logger.recordOutput("Shooter/LimelightDistanceOutOfRange", distanceOutOfRange);
-      Logger.recordOutput("Shooter/LimelightDistanceBucket", distanceBucket);
-      Logger.recordOutput("Shooter/LimelightDistanceTrimRPM", distanceTrimRpm);
-      Logger.recordOutput("Shooter/LimelightTableRecommendedRPM", tableEstimate.recommendedRpm);
-      Logger.recordOutput("Shooter/LimelightTableRangeMinRPM", tableEstimate.rangeMinRpm);
-      Logger.recordOutput("Shooter/LimelightTableRangeMaxRPM", tableEstimate.rangeMaxRpm);
-      Logger.recordOutput("Shooter/LimelightTableInterpolated", tableEstimate.interpolated);
-      Logger.recordOutput("Shooter/LimelightTableUsed", tableEstimate.fromTable);
-      Logger.recordOutput("Shooter/DistanceSource", observation.distanceSource);
+      Logger.recordOutput("Shooter/ModelRPM", modelRpm);
+      Logger.recordOutput("Shooter/CommandedRPM", commandedRPM);
+      Logger.recordOutput("Shooter/DistanceMeters", distanceMeters);
+      Logger.recordOutput("Shooter/MeasuredDistanceMeters", measuredDistanceMeters);
+      Logger.recordOutput("Shooter/DistanceOutOfRange", distanceOutOfRange);
+      Logger.recordOutput("Shooter/DistanceBucket", distanceBucket);
+      Logger.recordOutput("Shooter/DistanceTrimRPM", distanceTrimRpm);
+      Logger.recordOutput("Shooter/TableRecommendedRPM", tableEstimate.recommendedRpm);
+      Logger.recordOutput("Shooter/TableUsed", tableEstimate.fromTable);
       Logger.recordOutput("Shooter/TransferEfficiency", ProjectileMotion.FLYWHEEL_TRANSFER_EFFICIENCY);
-      Logger.recordOutput("Shooter/LimelightTargetTagID", observation.tagId);
 
-      cacheShooterAttemptSample(
-          nowSeconds, observation, distanceMeters, modelRpm, commandedRPM, distanceBucket);
+      cacheShooterAttemptSample(nowSeconds, distanceMeters, modelRpm, commandedRPM, distanceBucket);
       wasLimelightShotValidLastCycle = true;
       commandedShotRpm = commandedRPM;
 
       return RPM.of(commandedRPM);
     }).beforeStarting(() -> {
-      activeShooterAttemptId = LimelightAttemptTracker.nextAttemptId();
+      activeShooterAttemptId = nextAttemptId();
       lastInvalidTargetWarningTimestamp = -1.0;
       wasLimelightShotValidLastCycle = true;
       shooterAttemptHasValidSample = false;
       warnedInvalidTargetThisAttempt = false;
       commandedShotRpm = 0.0;
-      System.out.printf(
-          "LIMELIGHT_ATTEMPT_START,source=SHOOTER,attempt=%d%n",
-          activeShooterAttemptId);
+      System.out.printf("SHOT_ATTEMPT_START,attempt=%d%n", activeShooterAttemptId);
     }).finallyDo(() -> {
       wasLimelightShotValidLastCycle = true;
       lastInvalidTargetWarningTimestamp = -1.0;
@@ -297,21 +267,26 @@ public class ShooterSubsystem extends SubsystemBase {
         pendingFeedbackDistanceMeters = shooterAttemptLastDistanceMeters;
         pendingFeedbackCommandedRpm = shooterAttemptLastCommandedRpm;
         System.out.printf(
-            "SHOT_FEEDBACK_WINDOW_OPEN,source=SHOOTER,attempt=%d,bucket=%d,expires_s=%.3f,current_trim_rpm=%.1f%n",
+            "SHOT_FEEDBACK_WINDOW_OPEN,attempt=%d,bucket=%d,expires_s=%.3f,current_trim_rpm=%.1f%n",
             activeShooterAttemptId,
             pendingFeedbackBucket,
             pendingFeedbackExpirySeconds,
             limelightDistanceTrimRpm[pendingFeedbackBucket]);
       }
-      System.out.printf(
-          "LIMELIGHT_ATTEMPT_END,source=SHOOTER,attempt=%d%n",
-          activeShooterAttemptId);
+      System.out.printf("SHOT_ATTEMPT_END,attempt=%d%n", activeShooterAttemptId);
       activeShooterAttemptId = -1;
       shooterAttemptHasValidSample = false;
       warnedInvalidTargetThisAttempt = false;
       pendingFeedbackDistanceMeters = 0.0;
       pendingFeedbackCommandedRpm = 0.0;
-    }).withName("Shooter.setSpeedFromLimelight");
+    }).withName("Shooter.setSpeedForDistance");
+  }
+
+  /** Monotonic counter so each spin-up attempt can be correlated across log lines. */
+  private static int attemptCounter = 0;
+
+  private static synchronized int nextAttemptId() {
+    return ++attemptCounter;
   }
 
   /**
@@ -380,20 +355,16 @@ public class ShooterSubsystem extends SubsystemBase {
 
   private void cacheShooterAttemptSample(
       double nowSeconds,
-      TargetObservation observation,
       double distanceMeters,
       double modelRpm,
       double commandedRPM,
       int distanceBucket) {
     shooterAttemptHasValidSample = true;
     shooterAttemptLastTimestampSeconds = nowSeconds;
-    shooterAttemptLastTagId = observation.tagId;
     shooterAttemptLastDistanceMeters = distanceMeters;
     shooterAttemptLastEquationRpm = modelRpm;
     shooterAttemptLastCommandedRpm = commandedRPM;
     shooterAttemptLastActualRpm = getSpeed().in(RPM);
-    shooterAttemptLastBearingDegrees = observation.robotBearingDegrees;
-    shooterAttemptLastTurretAngleDegrees = observation.turretAngleDegrees;
     shooterAttemptLastDistanceBucket = distanceBucket;
   }
 

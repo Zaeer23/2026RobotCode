@@ -182,7 +182,7 @@ public final class Constants
       /**
        * Lens distance LEFT of robot center. The camera sits to the right of the turret pivot and
        * the pivot is on the centerline, so this is negative. Matches the 9 in lateral offset
-       * already measured in LimeLight.LIMELIGHT_LATERAL_OFFSET_INCHES.
+       * already measured on the robot.
        */
       public static final double MOUNT_LEFT_METERS = -Units.inchesToMeters(9.0);
 
@@ -196,7 +196,7 @@ public final class Constants
       public static final double MOUNT_YAW_DEGREES = 0.0;
 
       /** Height of the HUB AprilTag centers, from the official 2026 field layout. */
-      public static final double HUB_TAG_HEIGHT_METERS = frc.robot.FieldConstants.tagHeightMeters(20);
+      public static final double HUB_TAG_HEIGHT_METERS = frc.robot.vision.TagFunction.HUB.heightMeters();
 
       /** Latency beyond what the Limelight reports, covering NT transport and scheduler jitter. */
       public static final double LATENCY_FUDGE_MS = 20.0;

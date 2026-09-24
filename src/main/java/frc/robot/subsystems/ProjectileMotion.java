@@ -8,7 +8,6 @@ import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.util.Units;
 import frc.robot.Constants.LimeLightConstants;
 import frc.robot.Constants.ShooterConstants;
-import frc.robot.subsystems.LimeLight;
 
 /* 
         APOLOGIES IF THE ROBOT EXPLORES BECAUSE OF MY TRASH CODING, I'M NOT A PHYSICIST, 
@@ -33,7 +32,7 @@ import frc.robot.subsystems.LimeLight;
 
             2. Limelight only (no global pose needed),
 
-                    ShotSolution sol = ProjectileMotion.solveFromLimelight(limelight, 45.0);
+                    (removed: ranging now comes from AprilTagCamera, not from this class)
 
             
             3. Moving robot compensation (advanced, not yet implemented)
@@ -240,38 +239,6 @@ public class ProjectileMotion {
 
 
 
-    public static ShotSolution solveFromLimelight(
-            LimeLight limelight,
-            double fixedLaunchAngleDegrees) {
- 
-        if (!limelight.hasTarget()) {
-            return ShotSolution.invalid("Limelight has no target");
-        }
- 
-        double tx = limelight.getTX(); // horizontal offset in degrees
-        double ty = limelight.getTY(); // vertical offset in degrees
- 
-        double totalAngleRad = Math.toRadians(LIMELIGHT_MOUNT_ANGLE_DEGREES + ty);
-
-        if (Math.abs(totalAngleRad) < 1e-6) {
-            return ShotSolution.invalid("Limelight angle too close to horizontal — cannot compute distance");
-        }
-
-        double distanceToHub = (HUB_APRILTAG_HEIGHT_METERS - LIMELIGHT_MOUNT_HEIGHT_METERS) / Math.tan(totalAngleRad);
- 
-        if (distanceToHub <= 0) {
-            return ShotSolution.invalid("Limelight computed negative distance — check mount constants");
-        }
- 
-        double turretAngleDeg = tx; // the limelight tx IS the turret error in local frame
- 
-        double deltaHeight = HUB_TARGET_HEIGHT_METERS - SHOOTER_EXIT_HEIGHT_METERS;
- 
-        return solveSpeed(distanceToHub, deltaHeight, fixedLaunchAngleDegrees, turretAngleDeg,
-                "Limelight mode (dist=" + String.format("%.2f", distanceToHub) + "m, tx=" + tx + "°)");
-    }
-
-
 
 
     public static ShotSolution solveFromPoseOptimalAngle(
@@ -297,28 +264,6 @@ public class ProjectileMotion {
     }
 
 
-    public static ShotSolution solveFromLimelightOptimalAngle(LimeLight limelight) {
-        if (!limelight.hasTarget()) {
-            return ShotSolution.invalid("Limelight has no target");
-        }
- 
-        double tx = limelight.getTX();
-        double ty = limelight.getTY();
- 
-        double totalAngleRad = Math.toRadians(LIMELIGHT_MOUNT_ANGLE_DEGREES + ty);
-        if (Math.abs(totalAngleRad) < 1e-6) {
-            return ShotSolution.invalid("Limelight angle too close to horizontal");
-        }
-        double distanceToHub = (HUB_APRILTAG_HEIGHT_METERS - LIMELIGHT_MOUNT_HEIGHT_METERS)
-                / Math.tan(totalAngleRad);
- 
-        if (distanceToHub <= 0) {
-            return ShotSolution.invalid("Negative limelight distance");
-        }
- 
-        double deltaHeight = HUB_TARGET_HEIGHT_METERS - SHOOTER_EXIT_HEIGHT_METERS;
-        return solveOptimalAngleAndSpeed(distanceToHub, deltaHeight, tx, "Limelight optimal-angle mode");
-    }
 
 
     // solving speeds
