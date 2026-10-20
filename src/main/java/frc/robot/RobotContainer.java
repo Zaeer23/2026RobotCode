@@ -3,6 +3,7 @@
 // the WPILib BSD license file in the root directory of this project.
 
 package frc.robot;
+import com.pathplanner.lib.auto.NamedCommands;
 import edu.wpi.first.cameraserver.CameraServer;
 import edu.wpi.first.cscore.UsbCamera;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
@@ -163,7 +164,6 @@ private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
 );
 
   private final SendableChooser<Command> autoChooser = new SendableChooser<>();
-
   public RobotContainer()
   {
     // Configure the trigger bindings
@@ -172,20 +172,98 @@ private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
 
     configureSubSystemKeys();
     configureLimeLightKeys();
+
+    // Order matters. NamedCommands must exist before any PathPlannerAuto is constructed, and
+    // AutoBuilder must be configured before that, or every auto silently becomes Commands.none().
+    registerAutoCommands();
+    drivebase.setupPathPlanner();
     configureAutoChooser();
     m_dashboard.publishFieldLayout();
   }
 
+  /** Seconds an auto shot is allowed to take. The feed rollers never stop on their own. */
+  private static final double AUTO_SHOT_TIMEOUT_SECONDS = 3.5;
+  private static final double BLIND_SPINUP_SECONDS = 1.2;
+  private static final double BLIND_FEED_SECONDS = 1.5;
+
+  /**
+   * Commands the PathPlanner {@code .auto} files call by name.
+   *
+   * <p>Every one of these is bounded. The feed and intake commands run until interrupted, so an
+   * unbounded named command in a sequential auto stops the routine dead at that step and the robot
+   * spends the rest of autonomous standing still with its rollers on.
+   */
+  private void registerAutoCommands()
+  {
+    NamedCommands.registerCommand("Shoot", autoShotCommand());
+    NamedCommands.registerCommand("SpinUp", m_superstructure.shootAtMeasuredRangeCommand());
+    NamedCommands.registerCommand("IntakeDown", m_superstructure.setIntakeDeployAndRoll());
+    NamedCommands.registerCommand("StopAll", m_superstructure.stopAllCommand());
+    NamedCommands.registerCommand(
+        "AlignToHub", m_superstructure.alignDriveToTagCommand(drivebase).withTimeout(2.0));
+  }
+
+  /**
+   * One shot in autonomous.
+   *
+   * <p>Ranges off the Limelight when a hub tag is in view, which is the whole point of aiming with
+   * vision. When no tag is visible it falls back to a fixed-speed timed shot instead of waiting:
+   * {@code getHubDistanceMeters()} returns -1 with no target, the shot table correctly refuses to
+   * guess an RPM for that, and the result would otherwise be an auto that drives the whole routine
+   * and scores nothing because the flywheel never spun.
+   *
+   * <p>The branch is chosen once, when the command starts, which is what we want here — the robot
+   * is already parked at its shooting pose by then.
+   */
+  private Command autoShotCommand()
+  {
+    return Commands.either(
+        m_superstructure.shootWhenReadyCommand(),
+        blindShotCommand(),
+        m_superstructure::seesHub)
+        .withTimeout(AUTO_SHOT_TIMEOUT_SECONDS)
+        .withName("Auto.Shot");
+  }
+
+  /** Spin up for a fixed time, then feed for a fixed time. No vision, no readiness check. */
+  private Command blindShotCommand()
+  {
+    return Commands.deadline(
+        Commands.sequence(
+            Commands.waitSeconds(BLIND_SPINUP_SECONDS),
+            Commands.deadline(
+                Commands.waitSeconds(BLIND_FEED_SECONDS),
+                m_superstructure.feedAllCommand())),
+        m_shooter.spinUp())
+        .withName("Auto.BlindShot");
+  }
+
   private void configureAutoChooser()
   {
-    // Vision-driven autos are gone along with the old targeting stack. They come back once tag
-    // detection is proven on the real robot; shipping an auto that steers off a camera we cannot
-    // yet trust would just move the failure somewhere harder to debug.
-    autoChooser.setDefaultOption(
+    // Authored on the BLUE side only. PathPlanner mirrors them for red through the
+    // shouldFlipPath supplier in setupPathPlanner(), and 2026 Rebuilt is rotationally
+    // symmetric, which is PathPlanner's default. Do not hand-write red copies.
+    autoChooser.setDefaultOption("Centre - 2 ball", loadAuto("Centre 2 Ball"));
+    autoChooser.addOption("Bottom trench - 3 ball", loadAuto("Bottom Trench 3 Ball"));
+    autoChooser.addOption("Top trench - 3 ball", loadAuto("Top Trench 3 Ball"));
+    autoChooser.addOption("Shoot and leave (safe)", loadAuto("Shoot and Leave"));
+    autoChooser.addOption("Neutral zone denial", loadAuto("Neutral Zone Denial"));
+    autoChooser.addOption(
         "Blind timed shoot (no vision)",
         new ShootingCommand(m_shooter, m_kicker, m_hopper));
     autoChooser.addOption("Do nothing", Commands.none());
     SmartDashboard.putData("Auto Routine", autoChooser);
+  }
+
+  /**
+   * Loads one PathPlanner auto by name, reporting rather than throwing if it will not load.
+   *
+   * <p>A missing or malformed {@code .auto} throws out of the constructor otherwise, which takes
+   * the whole robot program down on boot over an auto nobody selected.
+   */
+  private Command loadAuto(String autoName)
+  {
+    return drivebase.getAutonomousCommand(autoName);
   }
 
   public void configureSubSystemKeys()
