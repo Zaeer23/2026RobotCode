@@ -17,7 +17,7 @@
               {
                 "type": "path",
                 "data": {
-                  "pathName": "Top Collect"
+                  "pathName": "Trench Bot In"
                 }
               },
               {
@@ -32,7 +32,7 @@
         {
           "type": "path",
           "data": {
-            "pathName": "Top Return"
+            "pathName": "Trench Bot Out"
           }
         },
         {

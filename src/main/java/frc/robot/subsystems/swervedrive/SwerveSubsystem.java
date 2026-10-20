@@ -787,6 +787,24 @@ public class SwerveSubsystem extends SubsystemBase
   }
 
   /**
+   * X-locks the wheels for as long as the command runs, to hold position while shooting.
+   *
+   * <p>Commanding zero velocity would keep the robot still only until something hits it. Turning
+   * the modules into an X points every wheel at a different angle, so a shove has to scrub all
+   * four sideways instead of rolling them, and the robot stays where the shot was ranged from.
+   * In a match that matters: getting nudged mid-shot changes the distance the RPM was computed
+   * for, and the shot misses.
+   *
+   * <p>{@link #lock()} is re-applied every loop rather than once, because anything else that
+   * commands the drive in the meantime would otherwise overwrite the module setpoints and quietly
+   * undo it.
+   */
+  public Command holdStillCommand()
+  {
+    return run(this::lock).withName("Swerve.HoldStillLocked");
+  }
+
+  /**
    * Gets the current pitch angle of the robot, as reported by the imu.
    *
    * @return The heading as a {@link Rotation2d} angle

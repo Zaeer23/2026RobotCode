@@ -215,12 +215,18 @@ private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
    */
   private Command autoShotCommand()
   {
-    return Commands.either(
+    Command shot = Commands.either(
         m_superstructure.shootWhenReadyCommand(),
         blindShotCommand(),
         m_superstructure::seesHub)
-        .withTimeout(AUTO_SHOT_TIMEOUT_SECONDS)
-        .withName("Auto.Shot");
+        .withTimeout(AUTO_SHOT_TIMEOUT_SECONDS);
+
+    // X-lock the wheels for the whole shot, for two reasons. Between two paths nothing requires
+    // the drivebase, so its default command takes back over and the chassis can drift while the
+    // flywheel spins up, which moves the range the RPM was computed for. And a locked drive
+    // resists being shoved by another robot mid-shot, which does the same thing but worse.
+    // The lock is the deadline's passenger, so it releases the moment the shot finishes.
+    return Commands.deadline(shot, drivebase.holdStillCommand()).withName("Auto.Shot");
   }
 
   /** Spin up for a fixed time, then feed for a fixed time. No vision, no readiness check. */
@@ -241,9 +247,12 @@ private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
     // Authored on the BLUE side only. PathPlanner mirrors them for red through the
     // shouldFlipPath supplier in setupPathPlanner(), and 2026 Rebuilt is rotationally
     // symmetric, which is PathPlanner's default. Do not hand-write red copies.
-    autoChooser.setDefaultOption("Centre - 2 ball", loadAuto("Centre 2 Ball"));
-    autoChooser.addOption("Bottom trench - 3 ball", loadAuto("Bottom Trench 3 Ball"));
-    autoChooser.addOption("Top trench - 3 ball", loadAuto("Top Trench 3 Ball"));
+    // Trench routes first: they run under the trench rather than beside it, which is what the
+    // open-floor routes kept clipping.
+    autoChooser.setDefaultOption("Trench bottom - cycle (3 shots)", loadAuto("Trench Bottom Cycle"));
+    autoChooser.addOption("Trench top - cycle (3 shots)", loadAuto("Trench Top Cycle"));
+    autoChooser.addOption("Trench bottom - safe (2 shots)", loadAuto("Trench Bottom Safe"));
+    autoChooser.addOption("Centre - 2 ball", loadAuto("Centre 2 Ball"));
     autoChooser.addOption("Shoot and leave (safe)", loadAuto("Shoot and Leave"));
     autoChooser.addOption("Neutral zone denial", loadAuto("Neutral Zone Denial"));
     autoChooser.addOption(

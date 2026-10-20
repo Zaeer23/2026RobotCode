@@ -34,12 +34,25 @@ public class AutoPathsTest {
       Set.of("Shoot", "SpinUp", "IntakeDown", "StopAll", "AlignToHub");
 
   private static final String[] AUTOS = {
+    "Trench Bottom Cycle",
+    "Trench Top Cycle",
+    "Trench Bottom Safe",
     "Centre 2 Ball",
-    "Bottom Trench 3 Ball",
-    "Top Trench 3 Ball",
     "Shoot and Leave",
     "Neutral Zone Denial"
   };
+
+  /**
+   * Paths that deliberately run under the trench, hard against the field edge.
+   *
+   * <p>These are exempt from the general wall margin. The robot drives them axis-aligned, so the
+   * clearance that matters is its half-width, not the half-diagonal a rotating robot needs.
+   */
+  private static final Set<String> TRENCH_PATHS =
+      Set.of("Trench Bot In", "Trench Bot Out", "Trench Top In", "Trench Top Out");
+
+  /** Half the robot's 0.9 m width, which is the real margin while it is square to the wall. */
+  private static final double ROBOT_HALF_WIDTH = 0.45;
 
   private static final double FIELD_LENGTH = 16.541;
   private static final double FIELD_WIDTH = 8.069;
@@ -160,18 +173,73 @@ public class AutoPathsTest {
   public void everyWaypointIsOnTheField() throws Exception {
     for (String auto : AUTOS) {
       for (String path : pathsOf(auto)) {
+        double margin = TRENCH_PATHS.contains(path) ? ROBOT_HALF_WIDTH : ROBOT_HALF_DIAGONAL;
         for (Translation2d point : allPoints(path)) {
           assertTrue(
-              point.getX() > ROBOT_HALF_DIAGONAL
-                  && point.getX() < FIELD_LENGTH - ROBOT_HALF_DIAGONAL,
+              point.getX() > margin && point.getX() < FIELD_LENGTH - margin,
               path + " point x=" + point.getX() + " puts the robot through a wall");
           assertTrue(
-              point.getY() > ROBOT_HALF_DIAGONAL
-                  && point.getY() < FIELD_WIDTH - ROBOT_HALF_DIAGONAL,
+              point.getY() > margin && point.getY() < FIELD_WIDTH - margin,
               path + " point y=" + point.getY() + " puts the robot through a wall");
         }
       }
     }
+  }
+
+  @Test
+  public void trenchLanesStayUnderTheTrench() throws Exception {
+    // The trench tags sit at y=0.644 and y=7.425. Running beside that line instead of on it is
+    // what clipped the trench structure, so these lanes are pinned to it within a tolerance, and
+    // still have to leave the robot's half-width clear of the field wall.
+    double tolerance = 0.30;
+    for (String path : TRENCH_PATHS) {
+      if (!pathFile(path).isFile()) {
+        continue;
+      }
+      boolean bottom = path.contains("Bot");
+      double trenchLine = bottom ? 0.644 : 7.425;
+      for (Translation2d point : allPoints(path)) {
+        assertTrue(
+            Math.abs(point.getY() - trenchLine) < tolerance,
+            path + " point y=" + point.getY() + " is "
+                + String.format("%.2f", Math.abs(point.getY() - trenchLine))
+                + " m off the trench line at " + trenchLine
+                + ", which runs it into the side of the trench rather than under it");
+        double wallGap = bottom ? point.getY() : FIELD_WIDTH - point.getY();
+        assertTrue(
+            wallGap > ROBOT_HALF_WIDTH,
+            path + " leaves only " + String.format("%.2f", wallGap)
+                + " m to the wall, less than the robot's half-width");
+      }
+    }
+  }
+
+  @Test
+  public void trenchCyclesCanActuallyRepeat() throws Exception {
+    // The cycle autos run the in-path and out-path more than once. That only works if the
+    // out-path finishes exactly where the in-path starts; a gap means the second lap begins by
+    // teleporting, and PathPlanner drives a straight line to catch up.
+    for (String pair : new String[] {"Bot", "Top"}) {
+      JsonNode in = read(pathFile("Trench " + pair + " In")).path("waypoints");
+      JsonNode out = read(pathFile("Trench " + pair + " Out")).path("waypoints");
+
+      Translation2d inStart = anchor(in.get(0));
+      Translation2d inEnd = anchor(in.get(in.size() - 1));
+      Translation2d outStart = anchor(out.get(0));
+      Translation2d outEnd = anchor(out.get(out.size() - 1));
+
+      assertTrue(inEnd.getDistance(outStart) < 0.01,
+          "Trench " + pair + " Out starts " + String.format("%.2f", inEnd.getDistance(outStart))
+              + " m from where In ends");
+      assertTrue(outEnd.getDistance(inStart) < 0.01,
+          "Trench " + pair + " Out ends " + String.format("%.2f", outEnd.getDistance(inStart))
+              + " m from where In starts, so the cycle cannot repeat");
+    }
+  }
+
+  private static Translation2d anchor(JsonNode waypoint) {
+    return new Translation2d(
+        waypoint.path("anchor").path("x").asDouble(), waypoint.path("anchor").path("y").asDouble());
   }
 
   @Test
