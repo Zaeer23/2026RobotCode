@@ -56,12 +56,14 @@ public class IntakeSubsystem extends SubsystemBase {
    */
   private static final double PIVOT_SHOOT_DEGREES = 75.0;
 
-  private static final double PIVOT_BOUNCE_HIGH_DEGREES = 23.0;
-  private static final double PIVOT_BOUNCE_LOW_DEGREES = 0.0;
   private static final double PIVOT_BOUNCE_PERIOD_SECONDS = 0.18;
-  private static final double PIVOT_INTAKE_OSCILLATE_HIGH_DEGREES = 27.0;
-  private static final double PIVOT_INTAKE_OSCILLATE_LOW_DEGREES = 0.0;
   private static final double PIVOT_INTAKE_OSCILLATE_PERIOD_SECONDS = 0.20;
+
+  // Pivot oscillation is commanded as raw duty cycle, not as a position setpoint. At a 0.18-0.20s
+  // period the closed-loop controller never reaches either endpoint before the target flips, so it
+  // only ever integrates against itself; driving the motor open-loop actually produces the shake.
+  private static final double PIVOT_BOUNCE_UP_OUTPUT = 0.55;
+  private static final double PIVOT_BOUNCE_DOWN_OUTPUT = -0.25;
 
   // 1. Changed roller motor to SparkMax with Brushless (NEO) type
   private final SparkMax rollerMotor = new SparkMax(Constants.IntakeConstants.kRollerMotorId, MotorType.kBrushless);
@@ -150,21 +152,19 @@ public class IntakeSubsystem extends SubsystemBase {
     return Commands.run(() -> {
       double phaseSeconds = Timer.getFPGATimestamp() % PIVOT_INTAKE_OSCILLATE_PERIOD_SECONDS;
       boolean highPhase = phaseSeconds < (PIVOT_INTAKE_OSCILLATE_PERIOD_SECONDS / 2.0);
-      double targetDegrees = highPhase ? PIVOT_INTAKE_OSCILLATE_HIGH_DEGREES : PIVOT_INTAKE_OSCILLATE_LOW_DEGREES;
-      intakePivotController.setPosition(Degrees.of(targetDegrees));
+      pivotMotor.set(highPhase ? PIVOT_BOUNCE_UP_OUTPUT : PIVOT_BOUNCE_DOWN_OUTPUT);
       smc.setDutyCycle(INTAKE_SPEED);
     }, this).finallyDo(() -> {
+      pivotMotor.set(0);
       smc.setDutyCycle(0);
-      setIntakeHold();
     }).withName("Intake.DeployAndRoll");
   }
 
   public Command backFeedAndRollCommand() {
     return Commands.run(() -> {
-      setIntakeDeployed();
+      smc.setDutyCycle(-INTAKE_SPEED);
     }, this).finallyDo(() -> {
       smc.setDutyCycle(0);
-      setIntakeHold();
     }).withName("Intake.BackFeedAndRoll");
   }
   /**
@@ -210,9 +210,8 @@ public class IntakeSubsystem extends SubsystemBase {
     return Commands.run(() -> {
       double phaseSeconds = Timer.getFPGATimestamp() % PIVOT_BOUNCE_PERIOD_SECONDS;
       boolean highPhase = phaseSeconds < (PIVOT_BOUNCE_PERIOD_SECONDS / 2.0);
-      double targetDegrees = highPhase ? PIVOT_BOUNCE_HIGH_DEGREES : PIVOT_BOUNCE_LOW_DEGREES;
-      intakePivotController.setPosition(Degrees.of(targetDegrees));
-    }, this).finallyDo(() -> intakePivotController.setPosition(Degrees.of(PIVOT_MIN_DEGREES)))
+      pivotMotor.set(highPhase ? PIVOT_BOUNCE_UP_OUTPUT : PIVOT_BOUNCE_DOWN_OUTPUT);
+    }, this).finallyDo(() -> pivotMotor.set(0))
         .withName("IntakePivot.BounceWhileFeeding");
   }
 

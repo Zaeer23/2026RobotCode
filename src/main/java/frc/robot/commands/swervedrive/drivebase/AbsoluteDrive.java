@@ -84,7 +84,7 @@ public class AbsoluteDrive extends Command
         Rotation2d firstLoopHeading = swerve.getHeading();
 
         // Set the Current Heading to the desired Heading
-        desiredSpeeds = swerve.getTargetSpeeds(0, 0, firstLoopHeading.getSin(), firstLoopHeading.getCos());
+        desiredSpeeds = swerve.getTargetSpeeds(0, 0, firstLoopHeading.getCos(), firstLoopHeading.getSin());
       }
       //Dont Init Rotation Again
       initRotation = false;
