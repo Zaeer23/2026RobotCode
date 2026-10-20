@@ -252,8 +252,7 @@ private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
     autoChooser.setDefaultOption("Trench bottom - cycle (3 shots)", loadAuto("Trench Bottom Cycle"));
     autoChooser.addOption("Trench top - cycle (3 shots)", loadAuto("Trench Top Cycle"));
     autoChooser.addOption("Trench bottom - safe (2 shots)", loadAuto("Trench Bottom Safe"));
-    autoChooser.addOption("Centre - 2 ball", loadAuto("Centre 2 Ball"));
-    autoChooser.addOption("Shoot and leave (safe)", loadAuto("Shoot and Leave"));
+    autoChooser.addOption("Trench top - safe (2 shots)", loadAuto("Trench Top Safe"));
     autoChooser.addOption("Neutral zone denial", loadAuto("Neutral Zone Denial"));
     autoChooser.addOption(
         "Blind timed shoot (no vision)",

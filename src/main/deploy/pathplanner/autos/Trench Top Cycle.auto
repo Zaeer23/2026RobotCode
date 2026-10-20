@@ -17,7 +17,7 @@
               {
                 "type": "path",
                 "data": {
-                  "pathName": "Trench Top In"
+                  "pathName": "Trench Top Enter"
                 }
               },
               {
@@ -27,12 +27,6 @@
                 }
               }
             ]
-          }
-        },
-        {
-          "type": "path",
-          "data": {
-            "pathName": "Trench Top Out"
           }
         },
         {
@@ -48,7 +42,7 @@
               {
                 "type": "path",
                 "data": {
-                  "pathName": "Trench Top In"
+                  "pathName": "Trench Top Gather"
                 }
               },
               {
@@ -58,12 +52,6 @@
                 }
               }
             ]
-          }
-        },
-        {
-          "type": "path",
-          "data": {
-            "pathName": "Trench Top Out"
           }
         },
         {

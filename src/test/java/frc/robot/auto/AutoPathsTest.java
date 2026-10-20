@@ -37,8 +37,7 @@ public class AutoPathsTest {
     "Trench Bottom Cycle",
     "Trench Top Cycle",
     "Trench Bottom Safe",
-    "Centre 2 Ball",
-    "Shoot and Leave",
+    "Trench Top Safe",
     "Neutral Zone Denial"
   };
 
@@ -49,14 +48,30 @@ public class AutoPathsTest {
    * clearance that matters is its half-width, not the half-diagonal a rotating robot needs.
    */
   private static final Set<String> TRENCH_PATHS =
-      Set.of("Trench Bot In", "Trench Bot Out", "Trench Top In", "Trench Top Out");
+      Set.of("Trench Bot Enter", "Trench Top Enter");
 
   /** Half the robot's 0.9 m width, which is the real margin while it is square to the wall. */
   private static final double ROBOT_HALF_WIDTH = 0.45;
 
+  // --- The barrier across the field, from the 2026 manual -------------------------------------
+  // A single line of structure spans the full width: trench, bump, HUB, bump, trench. The trench
+  // is 1.194 m deep and the HUB is a 47 in square, so the band is x in [4.03, 5.22]. The only
+  // ways through are under the two trenches or over the two bumps.
+
+  private static final double BARRIER_NEAR_X = 4.03;
+  private static final double BARRIER_FAR_X = 5.22;
+
+  /** Trench opening is 1.668 m wide, measured from the guardrail. */
+  private static final double TRENCH_WIDTH = 1.668;
+
   private static final double FIELD_LENGTH = 16.541;
   private static final double FIELD_WIDTH = 8.069;
   private static final double CENTRELINE_X = FIELD_LENGTH / 2.0;
+
+  private static final double BOTTOM_TRENCH_LOW = 0.0;
+  private static final double BOTTOM_TRENCH_HIGH = TRENCH_WIDTH;
+  private static final double TOP_TRENCH_LOW = FIELD_WIDTH - TRENCH_WIDTH;
+  private static final double TOP_TRENCH_HIGH = FIELD_WIDTH;
 
   /** The robot is 0.9 m square, so its centre is never legally nearer than this to an obstacle. */
   private static final double ROBOT_HALF_DIAGONAL = 0.64;
@@ -187,53 +202,67 @@ public class AutoPathsTest {
   }
 
   @Test
+  public void nothingCrossesTheBarrierExceptThroughATrench() throws Exception {
+    // This is the test that matters most. A single line of structure spans the field -- trench,
+    // bump, hub, bump, trench -- and the only ways across are under a trench or over a bump.
+    // Going over the bump is a 15 degree ramp with a 6.5 in crest taken at speed, which is the
+    // high-failure crossing: it unsettles odometry and can beach or tip the robot. Every route
+    // here crosses under a trench instead, and this asserts it.
+    //
+    // Control points count. The anchors can sit either side of the barrier while the curve
+    // between them cuts the corner straight across a bump.
+    for (String auto : AUTOS) {
+      for (String path : pathsOf(auto)) {
+        for (Translation2d point : allPoints(path)) {
+          boolean overlapsBarrier =
+              point.getX() + ROBOT_HALF_WIDTH > BARRIER_NEAR_X
+                  && point.getX() - ROBOT_HALF_WIDTH < BARRIER_FAR_X;
+          if (!overlapsBarrier) {
+            continue;
+          }
+
+          double low = point.getY() - ROBOT_HALF_WIDTH;
+          double high = point.getY() + ROBOT_HALF_WIDTH;
+          boolean inBottomTrench = low >= BOTTOM_TRENCH_LOW && high <= BOTTOM_TRENCH_HIGH;
+          boolean inTopTrench = low >= TOP_TRENCH_LOW && high <= TOP_TRENCH_HIGH;
+
+          assertTrue(
+              inBottomTrench || inTopTrench,
+              path + " point (" + String.format("%.2f, %.2f", point.getX(), point.getY())
+                  + ") is inside the barrier band x=[" + BARRIER_NEAR_X + ", " + BARRIER_FAR_X
+                  + "] but not inside a trench opening. That crosses a bump or the hub.");
+        }
+      }
+    }
+  }
+
+  @Test
   public void trenchLanesStayUnderTheTrench() throws Exception {
     // The trench tags sit at y=0.644 and y=7.425. Running beside that line instead of on it is
     // what clipped the trench structure, so these lanes are pinned to it within a tolerance, and
     // still have to leave the robot's half-width clear of the field wall.
-    double tolerance = 0.30;
+    // The trench opening is 1.668 m wide measured from the guardrail, so its centre is at
+    // 0.834 (bottom) and FIELD_WIDTH - 0.834 (top). Centring the lane leaves a 0.9 m robot
+    // 0.384 m either side; drifting off centre spends that margin for nothing.
+    double tolerance = 0.20;
     for (String path : TRENCH_PATHS) {
       if (!pathFile(path).isFile()) {
         continue;
       }
       boolean bottom = path.contains("Bot");
-      double trenchLine = bottom ? 0.644 : 7.425;
+      double laneCentre = bottom ? TRENCH_WIDTH / 2.0 : FIELD_WIDTH - TRENCH_WIDTH / 2.0;
       for (Translation2d point : allPoints(path)) {
         assertTrue(
-            Math.abs(point.getY() - trenchLine) < tolerance,
+            Math.abs(point.getY() - laneCentre) < tolerance,
             path + " point y=" + point.getY() + " is "
-                + String.format("%.2f", Math.abs(point.getY() - trenchLine))
-                + " m off the trench line at " + trenchLine
-                + ", which runs it into the side of the trench rather than under it");
+                + String.format("%.2f", Math.abs(point.getY() - laneCentre))
+                + " m off the trench centreline at " + String.format("%.3f", laneCentre));
         double wallGap = bottom ? point.getY() : FIELD_WIDTH - point.getY();
         assertTrue(
             wallGap > ROBOT_HALF_WIDTH,
             path + " leaves only " + String.format("%.2f", wallGap)
                 + " m to the wall, less than the robot's half-width");
       }
-    }
-  }
-
-  @Test
-  public void trenchCyclesCanActuallyRepeat() throws Exception {
-    // The cycle autos run the in-path and out-path more than once. That only works if the
-    // out-path finishes exactly where the in-path starts; a gap means the second lap begins by
-    // teleporting, and PathPlanner drives a straight line to catch up.
-    for (String pair : new String[] {"Bot", "Top"}) {
-      JsonNode in = read(pathFile("Trench " + pair + " In")).path("waypoints");
-      JsonNode out = read(pathFile("Trench " + pair + " Out")).path("waypoints");
-
-      Translation2d inStart = anchor(in.get(0));
-      Translation2d inEnd = anchor(in.get(in.size() - 1));
-      Translation2d outStart = anchor(out.get(0));
-      Translation2d outEnd = anchor(out.get(out.size() - 1));
-
-      assertTrue(inEnd.getDistance(outStart) < 0.01,
-          "Trench " + pair + " Out starts " + String.format("%.2f", inEnd.getDistance(outStart))
-              + " m from where In ends");
-      assertTrue(outEnd.getDistance(inStart) < 0.01,
-          "Trench " + pair + " Out ends " + String.format("%.2f", outEnd.getDistance(inStart))
-              + " m from where In starts, so the cycle cannot repeat");
     }
   }
 
