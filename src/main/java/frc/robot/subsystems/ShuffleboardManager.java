@@ -95,7 +95,7 @@ public class ShuffleboardManager {
     private final SimpleWidget entryOdometryOk;
     private final SimpleWidget entryTurretActualDeg;
     private final SimpleWidget entryShooterActualRPM;
-    private final SimpleWidget entryHoodAngleDeg;
+    private final SimpleWidget entryLaunchAngleDeg;
 
     private final SimpleWidget entryLLHasTarget;
     private final SimpleWidget entryLLTargetCount;
@@ -195,7 +195,7 @@ public class ShuffleboardManager {
                 .withSize(2, 1)
                 .withProperties(Map.of("Min", 0.0, "Max", 6000.0));
 
-        entryHoodAngleDeg = preMatch.add("Hood Angle (deg)", 0.0)
+        entryLaunchAngleDeg = preMatch.add("Launch Angle (deg)", 0.0)
                 .withPosition(4, 3)
                 .withSize(2, 1);
 
@@ -419,7 +419,7 @@ public class ShuffleboardManager {
 
         double shooterRPM = superstructure.getShooterSpeed().in(RPM);
         double turretDeg = superstructure.getTurretAngle().in(Degrees);
-        double hoodDeg = superstructure.getHoodAngle().in(Degrees);
+        double launchAngleDeg = superstructure.getLaunchAngle().in(Degrees);
         Pose2d pose = drivebase.getPose();
 
         entryTurretRawRotations.getEntry().setDouble(turret.getRawEncoderRotations());
@@ -437,7 +437,7 @@ public class ShuffleboardManager {
 
         entryTurretActualDeg.getEntry().setDouble(round1(turretDeg));
         entryShooterActualRPM.getEntry().setDouble(round1(shooterRPM));
-        entryHoodAngleDeg.getEntry().setDouble(round1(hoodDeg));
+        entryLaunchAngleDeg.getEntry().setDouble(round1(launchAngleDeg));
 
         Optional<VisionTarget> bestTag = camera.getTarget();
         boolean hasTarget = bestTag.isPresent();
@@ -470,11 +470,9 @@ public class ShuffleboardManager {
 
         double targetRPM = superstructure.getTargetShooterSpeed().in(RPM);
         double targetTurret = superstructure.getTargetTurretAngle().in(Degrees);
-        double targetHood = superstructure.getTargetHoodAngle().in(Degrees);
         boolean shooterReady = Math.abs(shooterRPM - targetRPM) < 100;
         boolean turretReady = Math.abs(turretDeg - targetTurret) < 1.0;
-        boolean hoodReady = Math.abs(hoodDeg - targetHood) < 2.0;
-        entryReadyToShoot.getEntry().setBoolean(shooterReady && turretReady && hoodReady && hasTarget);
+        entryReadyToShoot.getEntry().setBoolean(shooterReady && turretReady && hasTarget);
 
         field.setRobotPose(pose);
         updateFieldObjects(bestTag, pose);
@@ -488,7 +486,7 @@ public class ShuffleboardManager {
         entryTotalSpeed.getEntry().setDouble(round2(Math.hypot(speeds.vxMetersPerSecond, speeds.vyMetersPerSecond)));
 
         entryMatchHasTarget.getEntry().setBoolean(hasTarget);
-        entryMatchReady.getEntry().setBoolean(shooterReady && turretReady && hoodReady && hasTarget);
+        entryMatchReady.getEntry().setBoolean(shooterReady && turretReady && hasTarget);
         entryMatchTurretHealth.getEntry().setBoolean(turret.isTrackingHealthy());
         entryMatchTagId.getEntry().setInteger(bestTag.map((VisionTarget t) -> t.id).orElse(-1));
         entryMatchStream.getEntry().setString(camera.getStatus());

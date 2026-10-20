@@ -36,7 +36,6 @@ import frc.robot.subsystems.swervedrive.SwerveSubsystem;
 import java.io.File;
 import swervelib.SwerveInputStream;
 import frc.robot.subsystems.Superstructure;
-import frc.robot.subsystems.HoodSubsystem;
 import frc.robot.subsystems.ShooterSubsystem;
 import frc.robot.subsystems.ShuffleboardManager;
 import frc.robot.subsystems.ShuffleboardManager.ShooterControlProfile;
@@ -143,7 +142,6 @@ private final Limelight m_camera = new Limelight(Constants.LimeLightConstants.NA
    // Define the components (You may need to add imports for these)
 private final ShooterSubsystem m_shooter = new ShooterSubsystem();
 private final TurretSubsystem m_turret   = new TurretSubsystem();
-private final HoodSubsystem m_hood       = new HoodSubsystem();
 private final KickerSubsystem m_kicker   = new KickerSubsystem();
 private final IntakeSubsystem m_intake   = new IntakeSubsystem();
 private final HopperSubsystem m_hopper   = new HopperSubsystem();
@@ -153,7 +151,7 @@ private final UsbCamera m_driverCamera = startDriverCamera();
 
 // Create the Superstructure instance
 private final Superstructure m_superstructure = new Superstructure(
-    m_shooter, m_turret, m_hood, m_intake, m_hopper, m_kicker, m_camera
+    m_shooter, m_turret, m_intake, m_hopper, m_kicker, m_camera
 );
 private final ShuffleboardManager m_shuffleboard = new ShuffleboardManager(
     m_camera, m_superstructure, drivebase, m_turret, m_driverCamera
