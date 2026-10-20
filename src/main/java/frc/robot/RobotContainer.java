@@ -35,7 +35,6 @@ import frc.robot.subsystems.swervedrive.SwerveSubsystem;
 import java.io.File;
 import swervelib.SwerveInputStream;
 import frc.robot.subsystems.Superstructure;
-import frc.robot.subsystems.ClimberSubsystem;
 import frc.robot.subsystems.HoodSubsystem;
 import frc.robot.subsystems.ShooterSubsystem;
 import frc.robot.subsystems.ShuffleboardManager;
@@ -147,7 +146,7 @@ private final HoodSubsystem m_hood       = new HoodSubsystem();
 private final KickerSubsystem m_kicker   = new KickerSubsystem();
 private final IntakeSubsystem m_intake   = new IntakeSubsystem();
 private final HopperSubsystem m_hopper   = new HopperSubsystem();
-private final ClimberSubsystem m_climber = new ClimberSubsystem();
+// No climber on this robot. Constructing one opened a SparkMax on CAN ID 36 with no device behind it, so REVLib retried and logged a timeout every loop. Restore when a climber exists.
 private final UsbCamera m_driverCamera = startDriverCamera();
 
 
@@ -233,8 +232,6 @@ private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
     new Trigger(() -> isCurrentShooterProfile() && shooterXbox.x().getAsBoolean())
         .whileTrue(m_hopper.backFeedCommand());
 
-    //shooterXbox.leftBumper().whileTrue(m_climber.climbDownCommand());
-    //shooterXbox.leftTrigger(0.1).whileTrue(m_climber.climbUpCommand());
 
 //got rid of pov buttons because they like to break too often, might fix later for more precise aiming if we dont get limelight in ti
     // Holds the flywheel at zero output whenever nothing else is driving it, so releasing any
