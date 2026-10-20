@@ -51,8 +51,19 @@ public final class Constants
     public static final double TURN_CONSTANT    = 6;
   }
   public static class ClimberConstants {
-    public static final int kClimberMotorId = 36; 
-    public static final double kClimberSpeed = 0.8; 
+    /**
+     * Whether a climber is actually wired to {@link #kClimberMotorId}.
+     *
+     * <p>False: this robot has no climber and nothing is connected to CAN ID 36. While false,
+     * ClimberSubsystem never constructs a SparkMax, so the ID is never opened and the bus stays
+     * quiet. Opening it is what produced the repeating REVLib timeout, because configure() on an
+     * ID with no device behind it retries and reports a fault on every loop.
+     */
+    public static final boolean PRESENT = false;
+
+    /** Reserved for the climber. Not populated on this robot - see {@link #PRESENT}. */
+    public static final int kClimberMotorId = 36;
+    public static final double kClimberSpeed = 0.8;
   }
    
   public static class ShooterConstants {
@@ -173,10 +184,6 @@ public final class Constants
    public static class HopperConstants {
     public static final int kHopperMotorId = 43;// temporary value, will need to be updated when hopper is implemented
   }
-  public static class HoodConstants {
-    // 1 Neo, 0-90 degree variability, 50:1 reduction
-    public static final int kMotorId = 199999;
-  } // temporary value, will need to be updated when hood is implemented
   public static class IntakeConstants {
     // SparkFlex controlling the intake flywheel
     public static final int kPivotMotorId = 42;
