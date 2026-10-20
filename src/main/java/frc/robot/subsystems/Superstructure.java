@@ -18,9 +18,12 @@ import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.wpilibj2.command.button.Trigger;
 import frc.robot.Constants;
+import frc.robot.Constants.ShooterConstants;
 import frc.robot.Constants.TurretConstants;
 import frc.robot.subsystems.swervedrive.SwerveSubsystem;
-import frc.robot.vision.AprilTagCamera;
+import frc.robot.commands.DriveAlignCommand;
+import frc.robot.commands.TurretAimCommand;
+import frc.robot.vision.Limelight;
 
 
 /**
@@ -43,7 +46,7 @@ public class Superstructure extends SubsystemBase {
   public final IntakeSubsystem intake;
   public final HopperSubsystem hopper;
   public final KickerSubsystem kicker;
-  public final AprilTagCamera camera;
+  public final Limelight camera;
 
   // Tolerance for "at setpoint" checks
   private static final AngularVelocity SHOOTER_TOLERANCE = RPM.of(100);
@@ -72,7 +75,7 @@ public class Superstructure extends SubsystemBase {
   // Default aim point is red hub
 
   public Superstructure(ShooterSubsystem shooter, TurretSubsystem turret, HoodSubsystem hood, IntakeSubsystem intake,
-      HopperSubsystem hopper, KickerSubsystem kicker, AprilTagCamera camera) {
+      HopperSubsystem hopper, KickerSubsystem kicker, Limelight camera) {
     this.shooter = shooter;
     this.turret = turret;
     this.hood = hood;
@@ -283,22 +286,57 @@ public Command manualTurretControl(Supplier<Double> speedSupplier) {
   // ---- Vision -------------------------------------------------------------
   //
   // The whole AprilTag targeting stack was removed and is being rebuilt from the ground up. What
-  // exists right now is deliberately only the reading layer: AprilTagCamera reports which tags are
+  // exists right now is deliberately only the reading layer: Limelight reports which tags are
   // visible and how far away they are, and nothing steers a mechanism from it yet. Aiming,
   // lining up and vision-driven shooting get layered back on once tag detection is proven on the
   // real robot.
 
+  /**
+   * Points the turret at the alliance HUB and keeps it there.
+   *
+   * <p>See {@link TurretAimCommand} for why the camera's tx is not simply fed to the turret.
+   */
+  public Command aimTurretCommand() {
+    return new TurretAimCommand(turret, camera).withName("Superstructure.aimTurret");
+  }
+
+  /**
+   * Yaws the chassis to centre on the tag and keeps it centred.
+   *
+   * <p>Bind to a HELD button. It owns the drivebase for as long as it runs and never finishes by
+   * itself, so as a default command the driver would never be able to move.
+   */
+  public Command alignDriveToTagCommand(SwerveSubsystem drivebase) {
+    return new DriveAlignCommand(drivebase, camera).withName("Superstructure.alignDriveToTag");
+  }
+
   /** Range from the shooter exit to the alliance HUB, or -1 when no hub tag is visible. */
   public double getHubDistanceMeters() {
-    return camera.getBestHubTag()
-        .map(tag -> Math.max(0.0,
-            tag.distanceToCameraMeters - TurretConstants.SHOOTER_EXIT_RADIUS_METERS))
-        .orElse(-1.0);
+    return camera.getTarget().map(tag -> {
+      // Measure from where the ball actually leaves, not from the lens.
+      //
+      // tag.rangeMeters is LENS-to-tag, and the lens is neither at robot centre nor at the
+      // turret: it sits 8.5 in to the side and the turret pivot is 0.205 m behind centre. Taking
+      // the lens range and subtracting the exit radius mixes two different origins and is wrong
+      // by a few inches that change with angle. Going through the robot-frame tag position gets
+      // it right at any bearing.
+      double pivotX = TurretConstants.PIVOT_TO_ROBOT_CENTER.getX();
+      double pivotY = TurretConstants.PIVOT_TO_ROBOT_CENTER.getY();
+      double pivotToTag = Math.hypot(tag.robotFrameX() - pivotX, tag.robotFrameY() - pivotY);
+
+      // Once aimed, the ball leaves one exit radius out along the turret's axis, so the shot
+      // travels that much less than the pivot-to-tag distance. RANGE_BIAS_METERS then removes the
+      // camera's constant over-reporting, which was inflating every shot.
+      return Math.max(0.0,
+          pivotToTag
+              - TurretConstants.SHOOTER_EXIT_RADIUS_METERS
+              - ShooterConstants.RANGE_BIAS_METERS);
+    }).orElse(-1.0);
   }
 
   /** True when a HUB tag for this alliance is currently in view. */
   public boolean seesHub() {
-    return camera.getBestHubTag().isPresent();
+    return camera.getTarget().isPresent();
   }
 
   /**
@@ -307,6 +345,40 @@ public Command manualTurretControl(Supplier<Double> speedSupplier) {
    * <p>Aiming is the operator's job for now; this only sets the speed. The turret is not driven
    * from vision until tag detection is trusted.
    */
+  /**
+   * One-button shot: spin to the range-computed speed, then feed once it is genuinely ready.
+   *
+   * <p>The feed waits on {@code isAtShotSpeed} rather than firing immediately, because pushing a
+   * ball into a flywheel that has not reached speed is the single most reliable way to put it
+   * nowhere near the goal. The wait has a timeout so a mis-reported speed cannot lock the shot out
+   * entirely — after that it fires anyway and the driver can see the result.
+   *
+   * <p>Aiming is not part of this. The turret tracks on its own as a default command, so holding
+   * this does not fight the driver for the chassis.
+   */
+  public Command shootWhenReadyCommand() {
+    Command spin = shooter.setSpeedForDistance(this::getHubDistanceMeters);
+
+    // The pivot must be clear of the ball's path BEFORE anything feeds. Raising it in parallel
+    // with the spin-up costs no time, because the flywheel takes longer to reach speed than the
+    // pivot takes to lift.
+    Command raisePivot = Constants.IntakeConstants.ENABLED
+        ? intake.raiseForShotCommand().asProxy()
+        : Commands.none();
+
+    Command fire = Commands.sequence(
+        Commands.waitUntil(() ->
+            shooter.isAtShotSpeed()
+                && (!Constants.IntakeConstants.ENABLED || intake.isClearOfShot()))
+            .withTimeout(2.0),
+        feedAllCommand());
+
+    // Deadline on `fire`: spin-up and the raised pivot both persist for exactly as long as the
+    // shot needs them, then release.
+    return Commands.deadline(fire, spin, raisePivot)
+        .withName("Superstructure.shootWhenReady");
+  }
+
   public Command shootAtMeasuredRangeCommand() {
     return shooter.setSpeedForDistance(this::getHubDistanceMeters)
         .withName("Superstructure.shootAtMeasuredRange");
@@ -440,17 +512,17 @@ public Command setShooterPercent(Supplier<Double> percentSupplier) {
   
   /** True when the camera can see any AprilTag at all. */
   public boolean limelightHasTarget() {
-    return camera.hasAnyTag();
+    return !camera.getVisibleTargets().isEmpty();
   }
 
   /** Horizontal angle to the nearest tag, degrees, POSITIVE to the right. 0 when none visible. */
   public double getNearestTagTxDegrees() {
-    return camera.getBestTag().map(tag -> tag.txDegrees).orElse(0.0);
+    return camera.getTarget().map(tag -> tag.txDegrees).orElse(0.0);
   }
 
   /** Vertical angle to the nearest tag, degrees, POSITIVE up. 0 when none visible. */
   public double getNearestTagTyDegrees() {
-    return camera.getBestTag().map(tag -> tag.tyDegrees).orElse(0.0);
+    return camera.getTarget().map(tag -> tag.tyDegrees).orElse(0.0);
   }
 
 

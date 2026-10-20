@@ -32,7 +32,7 @@ import frc.robot.Constants.ShooterConstants;
 
             2. Limelight only (no global pose needed),
 
-                    (removed: ranging now comes from AprilTagCamera, not from this class)
+                    (removed: ranging now comes from the Limelight vision layer, not from this class)
 
             
             3. Moving robot compensation (advanced, not yet implemented)

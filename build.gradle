@@ -105,3 +105,73 @@ wpi.java.configureTestTasks(test)
 tasks.withType(JavaCompile) {
     options.compilerArgs.add '-XDstringConcat=inline'
 }
+
+// ---------------------------------------------------------------------------
+// Driver station dashboard
+//
+// A desktop Swing app, NOT robot code. The roboRIO is headless, so this runs on the driver
+// station laptop and talks to the robot over NetworkTables -- the same way Shuffleboard did.
+//
+// It lives in its own source set so it never ends up in the robot JAR: it pulls in Swing and an
+// MP3 decoder, neither of which belongs on the robot.
+//
+//   ./gradlew dashboard            launch it
+//   ./gradlew dashboardJar         build a double-clickable jar
+// ---------------------------------------------------------------------------
+sourceSets {
+    dashboard {
+        java.srcDir 'src/dashboard/java'
+        resources.srcDir 'src/dashboard/resources'
+        compileClasspath += sourceSets.main.compileClasspath
+        runtimeClasspath += sourceSets.main.runtimeClasspath
+    }
+}
+
+dependencies {
+    // Pure-Java MP3 decoder. Decoding to PCM ourselves (rather than using a black-box player)
+    // is what makes both the volume control and the visualiser possible: we hold the samples.
+    dashboardImplementation 'javazoom:jlayer:1.0.1'
+    dashboardImplementation wpi.java.deps.wpilib()
+    dashboardImplementation wpi.java.vendor.java()
+
+    // NetworkTables needs its native libraries on the desktop too. Without these the client
+    // throws "ntcorejni could not be loaded from path" the moment it starts.
+    dashboardRuntimeOnly wpi.java.deps.wpilibJniRelease(wpi.platforms.desktop)
+}
+
+task dashboard(type: JavaExec) {
+    group = 'robot'
+    description = 'Launch the driver station dashboard on this computer.'
+    // NetworkTables is native. extractReleaseNative unpacks the desktop .dll files that
+    // GradleRIO ships as zips, and the JVM needs to be told where they landed.
+    dependsOn 'extractReleaseNative'
+    systemProperty 'java.library.path', file('build/jni/release').absolutePath
+    classpath = sourceSets.dashboard.runtimeClasspath
+    mainClass = 'frc.dashboard.DashboardApp'
+}
+
+task dashboardJar(type: Jar) {
+    group = 'robot'
+    description = 'Build a standalone dashboard jar.'
+    dependsOn 'extractReleaseNative'
+    archiveBaseName = 'dashboard'
+    manifest { attributes 'Main-Class': 'frc.dashboard.DashboardApp' }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from sourceSets.dashboard.output
+    from {
+        sourceSets.dashboard.runtimeClasspath
+            .filter { it.name.endsWith('.jar') }
+            .collect { zipTree(it) }
+    }
+}
+
+// Stages the dashboard so it can be launched without gradle: the fat jar plus the native
+// NetworkTables libraries it needs beside it.
+task dashboardBundle(type: Copy) {
+    group = 'robot'
+    description = 'Build a standalone, double-clickable dashboard into build/dashboard.'
+    dependsOn 'dashboardJar', 'extractReleaseNative'
+    into "$buildDir/dashboard"
+    from(tasks.dashboardJar) { into '.' }
+    from("$buildDir/jni/release") { into 'natives' }
+}

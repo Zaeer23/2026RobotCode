@@ -47,6 +47,15 @@ public class IntakeSubsystem extends SubsystemBase {
   private static final double PIVOT_MIN_DEGREES = 0.0;
   private static final double PIVOT_MAX_DEGREES = 90.0;
   private static final double PIVOT_JOYSTICK_THRESHOLD = 0.25;
+  /**
+   * Where the pivot sits while a shot is being fired.
+   *
+   * <p>Raised, so the intake is clear of the ball's path out of the shooter. Feeding with the
+   * pivot down puts structure where the ball needs to be, which deflects shots unpredictably and
+   * looks like a shooter accuracy problem rather than a mechanism-in-the-way problem.
+   */
+  private static final double PIVOT_SHOOT_DEGREES = 75.0;
+
   private static final double PIVOT_BOUNCE_HIGH_DEGREES = 23.0;
   private static final double PIVOT_BOUNCE_LOW_DEGREES = 0.0;
   private static final double PIVOT_BOUNCE_PERIOD_SECONDS = 0.18;
@@ -233,5 +242,21 @@ public class IntakeSubsystem extends SubsystemBase {
   public void simulationPeriodic() {
     intake.simIterate();
     intakePivot.simIterate();
+  }
+
+  /**
+   * Raises the pivot clear of the shot and holds it there.
+   *
+   * <p>Held rather than set-and-forget: the pivot has a default command that would otherwise take
+   * the subsystem straight back and drop it again mid-shot.
+   */
+  public Command raiseForShotCommand() {
+    return run(() -> intakePivotController.setPosition(Degrees.of(PIVOT_SHOOT_DEGREES)))
+        .withName("Intake.raiseForShot");
+  }
+
+  /** True once the pivot is high enough to be out of the ball's way. */
+  public boolean isClearOfShot() {
+    return intakePivot.getAngle().in(Degrees) >= PIVOT_SHOOT_DEGREES - 10.0;
   }
 }

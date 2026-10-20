@@ -21,12 +21,16 @@ import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import edu.wpi.first.wpilibj2.command.button.Trigger;
 import frc.robot.Constants.OperatorConstants;
+import frc.robot.controls.ControlBinder;
+import frc.robot.controls.ControlConfig;
+import frc.robot.controls.ControlProfile.Action;
+import frc.robot.controls.RemappableController;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import frc.robot.commands.ShootingCommand;
 import frc.robot.subsystems.HopperSubsystem;
 import frc.robot.subsystems.IntakeSubsystem;
-import frc.robot.vision.AprilTagCamera;
+import frc.robot.vision.Limelight;
 import frc.robot.subsystems.swervedrive.SwerveSubsystem;
 import java.io.File;
 import swervelib.SwerveInputStream;
@@ -54,9 +58,33 @@ public class RobotContainer
   /** Driver USB camera. TEMPORARILY DISABLED — set true to bring the stream back. */
   private static final boolean DRIVER_CAMERA_ENABLED = false;
 
+  /**
+   * Operator's manual turret demand, profile-aware. Non-zero means they want manual control and
+   * vision aiming should get out of the way.
+   */
+  private double manualTurretInput()
+  {
+    if (isAltShooterProfile()) {
+      boolean left = shooterXbox.leftBumper().getAsBoolean();
+      boolean right = shooterXbox.rightBumper().getAsBoolean();
+      if (left == right) {
+        return 0.0;
+      }
+      return left ? -ALT_TURRET_MANUAL_SPEED : ALT_TURRET_MANUAL_SPEED;
+    }
+    return shooterXbox.getRightX() * 0.35;
+  }
+
   // Replace with CommandPS4Controller or CommandJoystick if needed
-  final         CommandXboxController driverXbox = new CommandXboxController(0);
-  final         CommandXboxController shooterXbox = new CommandXboxController(1);
+  private final ControlConfig m_controls = new ControlConfig();
+  final RemappableController driverXbox =
+      new RemappableController("driver", m_controls::driverPort);
+  final RemappableController shooterXbox =
+      new RemappableController("operator", m_controls::operatorPort);
+
+  /** Binds commands to ACTIONS, so a profile switch re-points every binding at once. */
+  private final ControlBinder m_binder =
+      new ControlBinder(driverXbox, shooterXbox, m_controls);
   // The robot's subsystems and commands are defined here...
   private final SwerveSubsystem       drivebase  = new SwerveSubsystem(new File(Filesystem.getDeployDirectory(),
                                                                                 "swerve/neo"));
@@ -111,7 +139,7 @@ public class RobotContainer
    * The container for the robot. Contains subsystems, OI devices, and commands.
    */
   // Declare the Limelight subsystem
-private final AprilTagCamera m_camera = new AprilTagCamera(Constants.LimeLightConstants.NAME);
+private final Limelight m_camera = new Limelight(Constants.LimeLightConstants.NAME);
    // Define the components (You may need to add imports for these)
 private final ShooterSubsystem m_shooter = new ShooterSubsystem();
 private final TurretSubsystem m_turret   = new TurretSubsystem();
@@ -131,6 +159,10 @@ private final ShuffleboardManager m_shuffleboard = new ShuffleboardManager(
     m_camera, m_superstructure, drivebase, m_turret, m_driverCamera
 );
 
+private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
+    m_superstructure, m_shooter, m_turret, drivebase, m_camera, m_controls
+);
+
   private final SendableChooser<Command> autoChooser = new SendableChooser<>();
 
   public RobotContainer()
@@ -142,6 +174,7 @@ private final ShuffleboardManager m_shuffleboard = new ShuffleboardManager(
     configureSubSystemKeys();
     configureLimeLightKeys();
     configureAutoChooser();
+    m_dashboard.publishFieldLayout();
   }
 
   private void configureAutoChooser()
@@ -174,30 +207,26 @@ private final ShuffleboardManager m_shuffleboard = new ShuffleboardManager(
     // the turret and still picks the moment to fire with the manual feed on A.
     new Trigger(() -> isCurrentShooterProfile() && shooterXbox.rightBumper().getAsBoolean())
         .whileTrue(m_superstructure.shootAtMeasuredRangeCommand());
-    new Trigger(() -> isCurrentShooterProfile() && shooterXbox.povLeft().getAsBoolean())
+    new Trigger(() -> isCurrentShooterProfile() && !shooterXbox.back().getAsBoolean() && shooterXbox.povLeft().getAsBoolean())
         .onTrue(m_shooter.decreaseLimelightPowerForLastShotCommand());
-    new Trigger(() -> isCurrentShooterProfile() && shooterXbox.povRight().getAsBoolean())
+    new Trigger(() -> isCurrentShooterProfile() && !shooterXbox.back().getAsBoolean() && shooterXbox.povRight().getAsBoolean())
         .onTrue(m_shooter.increaseLimelightPowerForLastShotCommand());
-    new Trigger(() -> isCurrentShooterProfile() && shooterXbox.povDown().getAsBoolean())
+    new Trigger(() -> isCurrentShooterProfile() && !shooterXbox.back().getAsBoolean() && shooterXbox.povDown().getAsBoolean())
         .onTrue(m_shooter.confirmMadeShotCommand());
     new Trigger(m_shooter::isFeedbackWindowOpen)
         .whileTrue(Commands.startEnd(
-            () -> shooterXbox.getHID().setRumble(RumbleType.kBothRumble, 1.0),
-            () -> shooterXbox.getHID().setRumble(RumbleType.kBothRumble, 0.0))
+            () -> shooterXbox.setRumble(1.0),
+            () -> shooterXbox.setRumble(0.0))
             .ignoringDisable(true));
     
-    m_turret.setDefaultCommand(
-        m_superstructure.manualTurretControl(() -> {
-          if (isAltShooterProfile()) {
-            boolean left = shooterXbox.leftBumper().getAsBoolean();
-            boolean right = shooterXbox.rightBumper().getAsBoolean();
-            if (left == right) {
-              return 0.0;
-            }
-            return left ? -ALT_TURRET_MANUAL_SPEED : ALT_TURRET_MANUAL_SPEED;
-          }
-          return shooterXbox.getRightX() * 0.35;
-        }));
+    // The turret tracks the hub by DEFAULT — no button to hold. The operator's stick interrupts it
+    // the instant they touch it, and tracking resumes the moment they let go. Unlike the drivebase,
+    // a self-aiming turret never stops the robot from driving, so always-on is the right behaviour
+    // here.
+    m_turret.setDefaultCommand(m_superstructure.aimTurretCommand());
+
+    new Trigger(() -> Math.abs(manualTurretInput()) > 0.08)
+        .whileTrue(m_superstructure.manualTurretControl(this::manualTurretInput));
 
     configureIntakeKeys();
 
@@ -208,9 +237,21 @@ private final ShuffleboardManager m_shuffleboard = new ShuffleboardManager(
     //shooterXbox.leftTrigger(0.1).whileTrue(m_climber.climbUpCommand());
 
 //got rid of pov buttons because they like to break too often, might fix later for more precise aiming if we dont get limelight in ti
-    Trigger shooterSpinupTrigger = new Trigger(() -> isCurrentShooterProfile() && shooterXbox.getRightTriggerAxis() > 0.10);
-    shooterSpinupTrigger.whileTrue(m_shooter.spinUp());
-    shooterSpinupTrigger.onFalse(m_shooter.stop());
+    // Holds the flywheel at zero output whenever nothing else is driving it, so releasing any
+    // shooter control genuinely stops the wheel instead of leaving the last setpoint applied.
+    m_shooter.setDefaultCommand(m_shooter.idleCommand());
+
+    // R2 (operator) = SHOOT. Spins to the range-computed speed and feeds once at speed.
+    new Trigger(() -> isCurrentShooterProfile() && shooterXbox.rightTrigger().getAsBoolean())
+        .whileTrue(m_superstructure.shootWhenReadyCommand());
+
+    // The old bare spin-up on this profile's R2 is gone: it wanted the shooter at the same time
+    // as the shoot command above, on the same button, so the two interrupted each other. Bare
+    // spin-up still exists on the alt profile below.
+    //
+    // No onFalse(stop()) anywhere here: releasing a trigger ends the command and the shooter's
+    // idle default takes the subsystem straight back. An explicit stop() would instead schedule a
+    // command that never ends, permanently locking the default out.
     new Trigger(() -> isAltShooterProfile() && shooterXbox.getRightTriggerAxis() > 0.10)
         .whileTrue(m_shooter.spinUp());
     new Trigger(() -> isAltShooterProfile() && shooterXbox.getLeftTriggerAxis() > 0.10)
@@ -257,7 +298,7 @@ private final ShuffleboardManager m_shuffleboard = new ShuffleboardManager(
   /**
    * Vision wiring.
    *
-   * <p>Currently nothing drives a mechanism from the camera. {@link AprilTagCamera} is registered
+   * <p>Currently nothing drives a mechanism from the camera. {@link frc.robot.vision.Limelight} is registered
    * as a subsystem, so its {@code periodic()} reads tags and publishes telemetry every loop with no
    * button press needed — open the {@code AprilTag/} keys on the dashboard to see what it sees.
    *
@@ -265,12 +306,95 @@ private final ShuffleboardManager m_shuffleboard = new ShuffleboardManager(
    * Both of those are hardware-side state that persists across reboots, and both previously made a
    * healthy camera look blind. Camera configuration belongs in the Limelight web UI.
    */
+  /**
+   * Reports which controllers are actually plugged in, once at boot and then on any change.
+   *
+   * <p>An absent controller makes every binding on it silently do nothing — the buttons are not
+   * "broken", they are simply never polled. That is indistinguishable from a software bug from the
+   * driver seat, and cost a debugging session chasing a turret that was fine.
+   */
+  public void reportControllerStatus()
+  {
+    boolean driver = DriverStation.isJoystickConnected(0);
+    boolean operator = DriverStation.isJoystickConnected(1);
+    if (driver == lastDriverConnected && operator == lastOperatorConnected) {
+      return;
+    }
+    lastDriverConnected = driver;
+    lastOperatorConnected = operator;
+
+    System.out.printf(
+        "[CONTROLLERS] driver(port 0)=%s  operator(port 1)=%s%n",
+        driver ? "CONNECTED" : "** NOT CONNECTED **",
+        operator ? "CONNECTED" : "** NOT CONNECTED **");
+    SmartDashboard.putBoolean("Controllers/DriverConnected", driver);
+    SmartDashboard.putBoolean("Controllers/OperatorConnected", operator);
+
+    if (!driver) {
+      DriverStation.reportWarning(
+          "[CONTROLLERS] Driver controller (port 0) is NOT connected. Every driverXbox binding "
+              + "is inactive, including the turret diagnostics. Use the operator controller: hold "
+              + "BACK + POV-UP for the raw turret test.",
+          false);
+    }
+  }
+
+  private boolean lastDriverConnected = true;
+  private boolean lastOperatorConnected = true;
+
   public void configureLimeLightKeys()
   {
     // Driver POV-RIGHT dumps every key the camera publishes to the console. Works while disabled,
     // which is when you actually want it: park the robot in front of a tag, press it, read the
     // output. POV-right is used because every face button on this controller is already taken.
     driverXbox.povRight().onTrue(m_camera.dumpDiagnosticsCommand());
+
+    // HELD: yaw the chassis to centre on the tag and follow it. Releases the drivebase on release.
+    // L2 (driver) = LINE UP. Held: yaws the chassis onto the tag and follows it, then hands the
+    // drivebase straight back when released.
+    driverXbox.leftTrigger().whileTrue(m_superstructure.alignDriveToTagCommand(drivebase));
+    driverXbox.rightBumper().whileTrue(m_superstructure.alignDriveToTagCommand(drivebase));
+
+    // TURRET TEST, NO CAMERA. Hold POV-LEFT to send the turret to +30 degrees, hold POV-DOWN for
+    // -30. Nothing about vision is involved, so this answers the one question that keeps getting
+    // tangled up: does the turret move at all?
+    //   Turret moves to the angle -> mechanism and control are fine, chase vision.
+    //   Turret does not move      -> vision is irrelevant, the problem is the turret.
+    driverXbox.povLeft().whileTrue(m_turret.gotoAngleCommand(30.0));
+    driverXbox.povDown().whileTrue(m_turret.gotoAngleCommand(-30.0));
+    driverXbox.povUp().whileTrue(m_turret.rawDutyCycleCommand(0.12));
+    driverXbox.b().onTrue(m_turret.rezero());
+
+    // The same three diagnostics on the OPERATOR controller, behind BACK as a modifier.
+    //
+    // They exist twice on purpose: the driver controller on port 0 is frequently not plugged in,
+    // and when it is absent every driverXbox binding silently does nothing. Duplicating them here
+    // means the diagnostics work from whichever controller is actually connected.
+    Trigger operatorDiagnostic = shooterXbox.back();
+    operatorDiagnostic.and(shooterXbox.povUp())
+        .whileTrue(m_turret.rawDutyCycleCommand(0.12));
+    operatorDiagnostic.and(shooterXbox.povLeft())
+        .whileTrue(m_turret.gotoAngleCommand(30.0));
+    operatorDiagnostic.and(shooterXbox.povRight())
+        .whileTrue(m_turret.gotoAngleCommand(-30.0));
+    operatorDiagnostic.and(shooterXbox.povDown())
+        .onTrue(m_turret.rezero());
+    operatorDiagnostic.and(shooterXbox.y())
+        .onTrue(m_camera.dumpDiagnosticsCommand());
+
+    // Toggle between aiming at ANY visible tag and only this alliance's HUB tags.
+    //
+    // Defaults to ANY_TAG. Hard-wiring the turret to alliance hub tags is what made a detected
+    // tag get silently dropped: hold up a RED hub tag with the driver station set to Blue and the
+    // camera sees it, the dashboard shows it, and the turret is never told about it.
+    operatorDiagnostic.and(shooterXbox.a())
+        .whileTrue(m_superstructure.alignDriveToTagCommand(drivebase));
+
+    operatorDiagnostic.and(shooterXbox.b())
+        .onTrue(m_camera.calibrateRangeCommand());
+
+    operatorDiagnostic.and(shooterXbox.x())
+        .onTrue(m_camera.toggleTargetFilterCommand());
   }
 
   /**
@@ -371,6 +495,17 @@ private final ShuffleboardManager m_shuffleboard = new ShuffleboardManager(
   public void updateShuffleboard()
   {
     m_shuffleboard.update();
+    // Pick up any live control remapping from the dashboard, then publish this loop's values.
+    m_controls.poll();
+    m_binder.publish(edu.wpi.first.networktables.NetworkTableInstance.getDefault()
+        .getTable(ControlConfig.TABLE));
+    m_dashboard.update();
+  }
+
+  /** Swaps which physical controller is the driver. No USB replugging. */
+  public void swapControllers()
+  {
+    m_controls.swapControllers();
   }
 
   /**

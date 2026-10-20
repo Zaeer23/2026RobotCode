@@ -2,7 +2,6 @@ package frc.robot.subsystems;
 
 import java.util.function.Supplier;
 
-import org.littletonrobotics.junction.Logger;
 
 import com.revrobotics.spark.SparkLowLevel.MotorType;
 import com.revrobotics.spark.SparkMax;
@@ -50,6 +49,7 @@ public class TurretSubsystem extends SubsystemBase {
   /** Minimum gap between tracking debug lines, so the console is not written 50 times a second. */
   private static final double TRACK_DEBUG_PERIOD_SECONDS = 0.5;
   private double lastTrackDebugTimestampSeconds = -1.0;
+  private double lastDriveReportSeconds = -1.0;
 
   public final Translation3d turretTranslation = new Translation3d(-0.205, 0.0, 0.375);
 
@@ -125,11 +125,145 @@ public class TurretSubsystem extends SubsystemBase {
     lastTrackingOutput = dutyCycle;
   }
 
+  // ---- Open-loop angle control --------------------------------------------
+  // The turret is positioned by proportional duty cycle rather than by handing an angle to the
+  // motor controller's position loop. setOpenLoop() is what the manual stick uses and what the
+  // team's original tracking used, and both move this turret; setPosition() has never been
+  // observed to move it on this robot.
+
+  /** Duty cycle per degree of angle error. */
+  private static final double GOTO_KP = 0.020;
+
+  /** Output ceiling, so a large error cannot slam the turret. */
+  private static final double GOTO_MAX_OUTPUT = 0.25;
+
+  /** Smallest output that breaks static friction, applied only outside the deadband. */
+  private static final double GOTO_STICTION_OUTPUT = 0.045;
+
+  /** Error below which the turret counts as arrived and output drops to zero. */
+  private static final double GOTO_DEADBAND_DEGREES = 0.75;
+
+  /** Stop driving toward a soft limit once this close to it. */
+  private static final double GOTO_LIMIT_GUARD_DEGREES = 1.0;
+
+  /**
+   * Drives the turret toward an absolute angle, open loop.
+   *
+   * <p>Proportional on error, with a friction floor applied only once the error is genuinely
+   * outside the deadband. The floor is a floor on a real demand, not a clamp minimum: clamping
+   * made the turret jump to minimum output the instant it left the deadband, overshoot back
+   * through, and hunt forever.
+   *
+   * @param targetDegrees absolute turret angle wanted
+   * @return true once the turret is inside the deadband
+   */
+  public boolean driveTowardAngle(double targetDegrees) {
+    double currentDegrees = turret.getAngle().in(Degrees);
+    double clampedTarget = Math.max(-MAX_ONE_DIR_FOV, Math.min(MAX_ONE_DIR_FOV, targetDegrees));
+    double error = clampedTarget - currentDegrees;
+
+    lastCommandedAngleDegrees = clampedTarget;
+    frc.robot.util.RobotLog.put("Turret/CommandedAngleDegrees", clampedTarget);
+    frc.robot.util.RobotLog.put("Turret/GotoErrorDegrees", error);
+
+    if (Math.abs(error) < GOTO_DEADBAND_DEGREES) {
+      setOpenLoop(0.0);
+      return true;
+    }
+
+    double output = error * GOTO_KP;
+    if (Math.abs(output) < GOTO_STICTION_OUTPUT) {
+      output = Math.copySign(GOTO_STICTION_OUTPUT, output);
+    }
+    output = Math.max(-GOTO_MAX_OUTPUT, Math.min(GOTO_MAX_OUTPUT, output));
+
+    double limit = MAX_ONE_DIR_FOV - GOTO_LIMIT_GUARD_DEGREES;
+    boolean blockedByLimit =
+        (currentDegrees >= limit && output > 0.0) || (currentDegrees <= -limit && output < 0.0);
+    if (blockedByLimit) {
+      output = 0.0;
+    }
+
+    setOpenLoop(output);
+    reportDrive(currentDegrees, clampedTarget, error, output, blockedByLimit);
+    return false;
+  }
+
+  /**
+   * Prints exactly why the turret is or is not moving, rate limited to twice a second.
+   *
+   * <p>Deliberately readable in the plain driver station console, no AdvantageScope needed. When
+   * the turret "refuses to move" this line says which of the possible causes it is: a commanded
+   * output of zero, a non-zero output that the motor is ignoring, an angle reading that is outside
+   * the soft limits, or the limit guard holding it back.
+   */
+  private void reportDrive(
+      double currentDegrees,
+      double targetDegrees,
+      double errorDegrees,
+      double output,
+      boolean blockedByLimit) {
+    double nowSeconds = Timer.getFPGATimestamp();
+    if (lastDriveReportSeconds >= 0.0 && nowSeconds - lastDriveReportSeconds < 0.5) {
+      return;
+    }
+    lastDriveReportSeconds = nowSeconds;
+
+    boolean angleOutsideSoftLimits = Math.abs(currentDegrees) > MAX_ONE_DIR_FOV;
+    System.out.printf(
+        "TURRET_DRIVE,angle=%.2f,target=%.2f,error=%.2f,output=%.3f,raw_rot=%.2f,%s%s%n",
+        currentDegrees,
+        targetDegrees,
+        errorDegrees,
+        output,
+        spark.getEncoder().getPosition(),
+        blockedByLimit ? "BLOCKED_BY_LIMIT_GUARD" : "driving",
+        angleOutsideSoftLimits
+            ? "  *** ANGLE IS OUTSIDE +/-" + (int) MAX_ONE_DIR_FOV
+                + " DEG - the Spark soft limits will refuse to move. Run Turret.Rezero. ***"
+            : "");
+  }
+
+  /**
+   * Drives to a fixed angle with NO camera involved.
+   *
+   * <p>This is the test that separates the two failures that look identical from the driver seat.
+   * If the turret reaches the angle, the mechanism and the control path are fine and any remaining
+   * aiming problem is vision. If it does not move, vision is irrelevant — the problem is here.
+   */
+  /**
+   * Commands a fixed duty cycle straight at the motor, bypassing every bit of our own logic.
+   *
+   * <p>No angle solve, no P loop, no deadband, no limit guard — just "turn". This is the test that
+   * separates "our code is computing zero output" from "the motor is not responding". If the
+   * turret does not move under this, nothing in the vision or aiming code is relevant: it is CAN
+   * wiring, the motor, a mechanical bind, or the Spark's own soft limits refusing the direction.
+   *
+   * <p>Note the Spark's configured soft limits still apply, which is deliberate — this is a
+   * diagnostic, not a way to drive the turret into its hard stop.
+   */
+  public Command rawDutyCycleCommand(double dutyCycle) {
+    return run(() -> {
+      spark.set(dutyCycle);
+      frc.robot.util.RobotLog.put("Turret/RawTestOutput", dutyCycle);
+      frc.robot.util.RobotLog.put("Turret/RawTestAngleDegrees", turret.getAngle().in(Degrees));
+    }).finallyDo(() -> {
+      spark.set(0.0);
+      frc.robot.util.RobotLog.put("Turret/RawTestOutput", 0.0);
+    }).withName("Turret.rawTest");
+  }
+
+  public Command gotoAngleCommand(double targetDegrees) {
+    return run(() -> driveTowardAngle(targetDegrees))
+        .finallyDo(() -> setOpenLoop(0.0))
+        .withName("Turret.goto" + (int) targetDegrees);
+  }
+
   public void setClosedLoopAngle(Angle angle) {
     Angle clampedAngle = Degrees.of(Math.max(-MAX_ONE_DIR_FOV, Math.min(MAX_ONE_DIR_FOV, angle.in(Degrees))));
     smc.setPosition(clampedAngle);
     lastCommandedAngleDegrees = clampedAngle.in(Degrees);
-    Logger.recordOutput("Turret/CommandedAngleDegrees", lastCommandedAngleDegrees);
+    frc.robot.util.RobotLog.put("Turret/CommandedAngleDegrees", lastCommandedAngleDegrees);
   }
 
   public Command manualSet(Supplier<Double> dutyCycleSupplier) {
@@ -154,12 +288,12 @@ public class TurretSubsystem extends SubsystemBase {
     filteredTrackingTxDegrees = 0.0;
     lastTrackingTagId = -1;
     lastTrackingTimestampSeconds = -1.0;
-    Logger.recordOutput("Turret/TrackingState", "NO_TARGET");
-    Logger.recordOutput("Turret/TrackingTagID", -1);
-    Logger.recordOutput("Turret/FilteredTX", 0.0);
-    Logger.recordOutput("Turret/TrackingDutyCycle", 0.0);
-    Logger.recordOutput("Turret/TrackingLastValidAgeSec", -1.0);
-    Logger.recordOutput("Turret/CommandedAngleDegrees", lastCommandedAngleDegrees);
+    frc.robot.util.RobotLog.put("Turret/TrackingState", "NO_TARGET");
+    frc.robot.util.RobotLog.put("Turret/TrackingTagID", -1);
+    frc.robot.util.RobotLog.put("Turret/FilteredTX", 0.0);
+    frc.robot.util.RobotLog.put("Turret/TrackingDutyCycle", 0.0);
+    frc.robot.util.RobotLog.put("Turret/TrackingLastValidAgeSec", -1.0);
+    frc.robot.util.RobotLog.put("Turret/CommandedAngleDegrees", lastCommandedAngleDegrees);
   }
 
   public void updateTrackingTelemetry(int tagId, double filteredTxDegrees, double dutyCycle) {
@@ -167,12 +301,12 @@ public class TurretSubsystem extends SubsystemBase {
     filteredTrackingTxDegrees = filteredTxDegrees;
     lastTrackingOutput = dutyCycle;
     lastTrackingTimestampSeconds = Timer.getFPGATimestamp();
-    Logger.recordOutput("Turret/TrackingState", "TRACKING");
-    Logger.recordOutput("Turret/TrackingTagID", tagId);
-    Logger.recordOutput("Turret/FilteredTX", filteredTxDegrees);
-    Logger.recordOutput("Turret/TrackingDutyCycle", dutyCycle);
-    Logger.recordOutput("Turret/TrackingLastValidAgeSec", 0.0);
-    Logger.recordOutput("Turret/CommandedAngleDegrees", lastCommandedAngleDegrees);
+    frc.robot.util.RobotLog.put("Turret/TrackingState", "TRACKING");
+    frc.robot.util.RobotLog.put("Turret/TrackingTagID", tagId);
+    frc.robot.util.RobotLog.put("Turret/FilteredTX", filteredTxDegrees);
+    frc.robot.util.RobotLog.put("Turret/TrackingDutyCycle", dutyCycle);
+    frc.robot.util.RobotLog.put("Turret/TrackingLastValidAgeSec", 0.0);
+    frc.robot.util.RobotLog.put("Turret/CommandedAngleDegrees", lastCommandedAngleDegrees);
   }
 
   public double getLastTrackingOutput() {
@@ -226,11 +360,11 @@ public class TurretSubsystem extends SubsystemBase {
   @Override
   public void periodic() {
     turret.updateTelemetry();
-    Logger.recordOutput("Turret/AngleDegrees", turret.getAngle().in(Degrees));
-    Logger.recordOutput("Turret/AngleErrorDegrees", lastCommandedAngleDegrees - turret.getAngle().in(Degrees));
-    Logger.recordOutput("Turret/RawEncoderRotations", spark.getEncoder().getPosition());
-    Logger.recordOutput("Turret/LastTrackingOutput", lastTrackingOutput);
-    Logger.recordOutput("ASCalibration/FinalComponentPoses", new Pose3d[] {
+    frc.robot.util.RobotLog.put("Turret/AngleDegrees", turret.getAngle().in(Degrees));
+    frc.robot.util.RobotLog.put("Turret/AngleErrorDegrees", lastCommandedAngleDegrees - turret.getAngle().in(Degrees));
+    frc.robot.util.RobotLog.put("Turret/RawEncoderRotations", spark.getEncoder().getPosition());
+    frc.robot.util.RobotLog.put("Turret/LastTrackingOutput", lastTrackingOutput);
+    frc.robot.util.RobotLog.put("ASCalibration/FinalComponentPoses", new Pose3d[] {
         new Pose3d(
             turretTranslation,
             new Rotation3d(0, 0, turret.getAngle().in(Radians)))

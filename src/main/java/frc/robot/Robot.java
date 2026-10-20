@@ -9,7 +9,7 @@ import edu.wpi.first.wpilibj.TimedRobot;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
-import frc.robot.vision.AprilTagCamera;
+import frc.robot.vision.Limelight;
 import java.util.logging.Logger;
 import java.util.logging.Level;
 /**
@@ -80,7 +80,7 @@ public class Robot extends TimedRobot
     // Forwards mDNS, static IP and USB routes at once, and prints every URL to try. These were two
     // separate calls that both claimed local ports 5800-5809, so the second silently replaced the
     // first and only one route ever actually worked.
-    AprilTagCamera.setupPortForwarding();
+    Limelight.setupPortForwarding();
 
     if (isSimulation())
     {
@@ -104,6 +104,8 @@ public class Robot extends TimedRobot
     // block in order for anything in the Command-based framework to work.
     CommandScheduler.getInstance().run();
     m_robotContainer.updateShuffleboard();
+    // Cheap: only prints when a controller is plugged in or unplugged.
+    m_robotContainer.reportControllerStatus();
   }
 
   /**

@@ -3,7 +3,6 @@ package frc.robot.subsystems;
 import java.util.function.DoubleSupplier;
 import java.util.function.Supplier;
 
-import org.littletonrobotics.junction.Logger;
 
 import com.revrobotics.spark.SparkLowLevel.MotorType;
 import com.revrobotics.spark.SparkMax;
@@ -28,6 +27,7 @@ import edu.wpi.first.units.measure.LinearVelocity;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.Preferences;
 import edu.wpi.first.wpilibj.Timer;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.wpilibj2.command.WaitCommand;
@@ -61,7 +61,14 @@ import yams.motorcontrollers.local.SparkWrapper;
  * real robot always disagrees with physics somewhere. Neither one alone was enough.
  */
 public class ShooterSubsystem extends SubsystemBase {
-  private static final double SHOOTER_SPINUP_RPM = 3600.0;
+  /**
+   * Speed for the manual spin-up on the operator trigger.
+   *
+   * <p>Was 3600, which was well above the calibrated reference shot and above the vision clamp
+   * ceiling — so pulling the trigger fired noticeably harder than any vision-aimed shot. Matched
+   * to the reference so manual and automatic shots behave the same.
+   */
+  private static final double SHOOTER_SPINUP_RPM = ShooterConstants.REFERENCE_RPM;
   private static final double INVALID_TARGET_WARNING_PERIOD_SECONDS = 5.0;
   private static final double LIMELIGHT_FEEDBACK_STEP_RPM = 75.0;
   private static final double FEEDBACK_WINDOW_SECONDS = 10.0;
@@ -160,8 +167,31 @@ public class ShooterSubsystem extends SubsystemBase {
     return setSpeed(RPM.of(SHOOTER_SPINUP_RPM));
   }
 
+  /**
+   * Stops the flywheel by cutting output, not by asking the velocity loop for 0 RPM.
+   *
+   * <p>This used to be {@code setSpeed(RPM.of(0))}. That leaves the closed-loop controller running
+   * with a 0 setpoint, and with kS = 0.191 V in the feedforward the loop can keep putting voltage
+   * into a stationary wheel — which is what made the shooter creep and buzz while "stopped".
+   * Commanding zero duty cycle is unambiguous.
+   */
   public Command stop() {
-    return setSpeed(RPM.of(0));
+    // Momentary, not a hold. It cuts output and finishes immediately, handing the subsystem back
+    // to idleCommand() which keeps it at zero. A hold here would never finish, so any
+    // Commands.parallel(...stop()...) at the end of a sequence — like the one closing out
+    // ShootingCommand — would hang forever waiting on it.
+    return runOnce(() -> leaderSpark.set(0.0)).withName("Shooter.stop");
+  }
+
+  /**
+   * Default command: holds the flywheel at zero output whenever nothing else is using it.
+   *
+   * <p>Without this the shooter had no default command at all, so after any command ended the
+   * SparkMax simply kept applying whatever it was last told. That is why it sat there spinning on
+   * its own — nothing was telling it to stop, so it never did.
+   */
+  public Command idleCommand() {
+    return run(() -> leaderSpark.set(0.0)).withName("Shooter.IDLE");
   }
 
   public AngularVelocity getSpeed() {
@@ -200,9 +230,9 @@ public class ShooterSubsystem extends SubsystemBase {
       double measuredDistanceMeters = shooterDistanceMetersSupplier.getAsDouble();
 
       if (!(measuredDistanceMeters > 0.0) || !Double.isFinite(measuredDistanceMeters)) {
-        Logger.recordOutput("Shooter/ShotValid", false);
-        Logger.recordOutput("Shooter/ShotMessage", "no range available");
-        Logger.recordOutput("Shooter/CommandedRPM", 0.0);
+        frc.robot.util.RobotLog.put("Shooter/ShotValid", false);
+        frc.robot.util.RobotLog.put("Shooter/ShotMessage", "no range available");
+        frc.robot.util.RobotLog.put("Shooter/CommandedRPM", 0.0);
         maybeReportInvalidTarget(nowSeconds, "no range available");
         wasLimelightShotValidLastCycle = false;
         commandedShotRpm = 0.0;
@@ -228,19 +258,35 @@ public class ShooterSubsystem extends SubsystemBase {
       double commandedRPM = MathUtil.clamp(
           rangedRecommended, ShooterConstants.MIN_SHOT_RPM, ShooterConstants.MAX_SHOT_RPM);
 
-      Logger.recordOutput("Shooter/ShotValid", true);
-      Logger.recordOutput("Shooter/ShotMessage",
+      // Flag a shot pinned at the ceiling. Past this range the flywheel cannot go any faster, so
+      // the distance/RPM relationship flattens and shots start falling short with no other
+      // symptom. Better to say so than to let it look like a tuning problem.
+      boolean saturated = commandedRPM >= ShooterConstants.MAX_SHOT_RPM - 1.0
+          && modelRpm > ShooterConstants.MAX_SHOT_RPM;
+      frc.robot.util.RobotLog.put("Shooter/Saturated", saturated);
+      SmartDashboard.putBoolean("Shooter/Saturated", saturated);
+      if (saturated) {
+        maybeWarnSaturated(nowSeconds, distanceMeters, modelRpm);
+      }
+
+      // The headline pair: what range was measured, and what power it produced.
+      SmartDashboard.putNumber("Shooter/DistanceMeters", distanceMeters);
+      SmartDashboard.putNumber("Shooter/DistanceFeet", distanceMeters * 3.28084);
+      SmartDashboard.putNumber("Shooter/CommandedRPM", commandedRPM);
+
+      frc.robot.util.RobotLog.put("Shooter/ShotValid", true);
+      frc.robot.util.RobotLog.put("Shooter/ShotMessage",
           tableEstimate.fromTable ? "Learned shot table" : "Physics model anchored on reference shot");
-      Logger.recordOutput("Shooter/ModelRPM", modelRpm);
-      Logger.recordOutput("Shooter/CommandedRPM", commandedRPM);
-      Logger.recordOutput("Shooter/DistanceMeters", distanceMeters);
-      Logger.recordOutput("Shooter/MeasuredDistanceMeters", measuredDistanceMeters);
-      Logger.recordOutput("Shooter/DistanceOutOfRange", distanceOutOfRange);
-      Logger.recordOutput("Shooter/DistanceBucket", distanceBucket);
-      Logger.recordOutput("Shooter/DistanceTrimRPM", distanceTrimRpm);
-      Logger.recordOutput("Shooter/TableRecommendedRPM", tableEstimate.recommendedRpm);
-      Logger.recordOutput("Shooter/TableUsed", tableEstimate.fromTable);
-      Logger.recordOutput("Shooter/TransferEfficiency", ProjectileMotion.FLYWHEEL_TRANSFER_EFFICIENCY);
+      frc.robot.util.RobotLog.put("Shooter/ModelRPM", modelRpm);
+      frc.robot.util.RobotLog.put("Shooter/CommandedRPM", commandedRPM);
+      frc.robot.util.RobotLog.put("Shooter/DistanceMeters", distanceMeters);
+      frc.robot.util.RobotLog.put("Shooter/MeasuredDistanceMeters", measuredDistanceMeters);
+      frc.robot.util.RobotLog.put("Shooter/DistanceOutOfRange", distanceOutOfRange);
+      frc.robot.util.RobotLog.put("Shooter/DistanceBucket", distanceBucket);
+      frc.robot.util.RobotLog.put("Shooter/DistanceTrimRPM", distanceTrimRpm);
+      frc.robot.util.RobotLog.put("Shooter/TableRecommendedRPM", tableEstimate.recommendedRpm);
+      frc.robot.util.RobotLog.put("Shooter/TableUsed", tableEstimate.fromTable);
+      frc.robot.util.RobotLog.put("Shooter/TransferEfficiency", ProjectileMotion.FLYWHEEL_TRANSFER_EFFICIENCY);
 
       cacheShooterAttemptSample(nowSeconds, distanceMeters, modelRpm, commandedRPM, distanceBucket);
       wasLimelightShotValidLastCycle = true;
@@ -282,6 +328,23 @@ public class ShooterSubsystem extends SubsystemBase {
     }).withName("Shooter.setSpeedForDistance");
   }
 
+  private double lastSaturationWarningSeconds = -1.0;
+
+  private void maybeWarnSaturated(double nowSeconds, double distanceMeters, double wantedRpm) {
+    if (lastSaturationWarningSeconds >= 0.0
+        && nowSeconds - lastSaturationWarningSeconds < 5.0) {
+      return;
+    }
+    lastSaturationWarningSeconds = nowSeconds;
+    DriverStation.reportWarning(
+        String.format(
+            "[SHOOTER] Out of range: %.2f m needs %.0f RPM but the flywheel ceiling is %.0f. "
+                + "This shot will fall short. Drive closer, or raise "
+                + "ShooterConstants.MAX_MECHANICAL_RPM if the hardware allows it.",
+            distanceMeters, wantedRpm, ShooterConstants.MAX_SHOT_RPM),
+        false);
+  }
+
   /** Monotonic counter so each spin-up attempt can be correlated across log lines. */
   private static int attemptCounter = 0;
 
@@ -295,12 +358,21 @@ public class ShooterSubsystem extends SubsystemBase {
    * <p>Falls back to the reference shot if the geometry is unsolvable — which happens when the
    * target is so close that a 45 degree launch cannot come back down in time.
    */
+  /**
+   * RPM for a shot distance, straight from the measured table.
+   *
+   * <p>This used to call projectile physics scaled by one back-solved efficiency factor. The shape
+   * was right but the detail was not — a single global factor cannot absorb ball compression,
+   * slip, wheel wear and an approximate hood angle all at once, so it was accurate near the one
+   * reference shot and long at the ends. {@link ShotTable} holds measurements instead, where a
+   * wrong row is fixed by editing that row and nothing else moves.
+   */
   private double modelRpmForDistance(double distanceMeters) {
-    double physicsRpm = ProjectileMotion.flywheelRpmForDistance(distanceMeters);
-    if (!Double.isFinite(physicsRpm)) {
+    double rpm = ShotTable.rawRpmForDistance(distanceMeters);
+    if (!Double.isFinite(rpm) || rpm <= 0.0) {
       return ShooterConstants.REFERENCE_RPM;
     }
-    return physicsRpm;
+    return rpm;
   }
 
   private double rpmForDistanceMeters(double distanceMeters) {
@@ -312,9 +384,9 @@ public class ShooterSubsystem extends SubsystemBase {
 
   @Override
   public void periodic() {
-    Logger.recordOutput("Shooter/LeaderVelocity", leaderSpark.getEncoder().getVelocity());
-    Logger.recordOutput("Shooter/FollowerVelocity", followerSpark.getEncoder().getVelocity());
-    Logger.recordOutput("Shooter/AtShotSpeed", isAtShotSpeed());
+    frc.robot.util.RobotLog.put("Shooter/LeaderVelocity", leaderSpark.getEncoder().getVelocity());
+    frc.robot.util.RobotLog.put("Shooter/FollowerVelocity", followerSpark.getEncoder().getVelocity());
+    frc.robot.util.RobotLog.put("Shooter/AtShotSpeed", isAtShotSpeed());
     maybeFinalizeFeedbackWindow();
   }
 

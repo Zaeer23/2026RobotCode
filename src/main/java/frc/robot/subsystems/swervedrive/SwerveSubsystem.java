@@ -109,7 +109,14 @@ public class SwerveSubsystem extends SubsystemBase
                                                                       Meter.of(4)),
                                                     Rotation2d.fromDegrees(180));
     // Configure the Telemetry before creating the SwerveDrive to avoid unnecessary objects being created.
-    SwerveDriveTelemetry.verbosity = TelemetryVerbosity.HIGH;
+    // LOW, not HIGH. At HIGH, YAGSL publishes module states, desired states and encoder arrays to
+    // NetworkTables on EVERY drive() call -- 50 times a second, forever. The outgoing NT queue
+    // allocates in native memory, and when it fills faster than the radio drains it that memory
+    // is never reclaimed: the result is a std::bad_alloc, which is a NATIVE allocation failure
+    // and so survives any amount of Java-side tuning.
+    //
+    // Raise this temporarily when debugging swerve modules, then put it back.
+    SwerveDriveTelemetry.verbosity = TelemetryVerbosity.LOW;
     try
     {
       swerveDrive = new SwerveParser(directory).createSwerveDrive(Constants.MAX_SPEED, startingPose);

@@ -22,7 +22,7 @@ public final class Constants
   public static final double ROBOT_MASS = (148 - 20.3) * 0.453592; // 32lbs * kg per pound
   public static final Matter CHASSIS    = new Matter(new Translation3d(0, 0, Units.inchesToMeters(8)), ROBOT_MASS);
   public static final double LOOP_TIME  = 0.13; //s, 20ms + 110ms sprk max velocity lag
-  public static final double MAX_SPEED  = Units.feetToMeters(12.5);
+  public static final double MAX_SPEED  = Units.feetToMeters(3.5);
   // Maximum speed of the robot in meters per second, used to limit acceleration.
 
 //  public static final class AutonConstants
@@ -81,6 +81,21 @@ public final class Constants
     /** Distance from the shooter exit to the hub for the reference shot. 11 ft 6 in. */
     public static final double REFERENCE_DISTANCE_METERS = 3.5052;
 
+    /**
+     * Constant correction subtracted from every vision range, in meters. Currently 7 inches.
+     *
+     * <p>The camera reports consistently FAR, so the shot curve was being asked for a longer shot
+     * than the real one and every ball went long. A fixed bias like this is the signature of an
+     * origin mismatch rather than a bad angle: the ty solve returns range to the tag's PLANE, the
+     * tag sits proud of the structure it is bolted to, and the measuring tape goes to a different
+     * reference point again. An angular error would grow with distance; this does not.
+     *
+     * <p>To re-measure: park at a tape-measured distance, compare {@code Shooter/DistanceFeet},
+     * and adjust by the difference. If the error instead GROWS with distance, this is the wrong
+     * knob — fix MOUNT_HEIGHT_METERS or MOUNT_PITCH_DEGREES with BACK+B first.
+     */
+    public static final double RANGE_BIAS_METERS = Units.inchesToMeters(7.0);
+
     /** Flywheel RPM that scores from REFERENCE_DISTANCE_METERS. */
     public static final double REFERENCE_RPM = 3200.0;
 
@@ -92,10 +107,20 @@ public final class Constants
      * the computed speed, so the distance model did nothing at short range.
      */
     public static final double MIN_SHOT_RPM = 2200.0;
-    public static final double MAX_SHOT_RPM = 4800.0;
 
-    /** Mechanical ceiling; the flywheel soft limit. */
-    public static final double MAX_MECHANICAL_RPM = 5600.0;
+    /** Mechanical ceiling; the flywheel soft limit. Declared first so MAX_SHOT_RPM can use it. */
+    public static final double MAX_MECHANICAL_RPM = 3600.0;
+
+    /**
+     * Upper end of the commanded range.
+     *
+     * <p>Capped at the mechanical ceiling on purpose. This was a flat 4800 while the flywheel soft
+     * limit sat at 3600, so for any shot the model priced above 3600 the commanded speed and the
+     * achievable speed quietly diverged: the distance/RPM relationship went flat without anything
+     * saying so. Deriving it from the ceiling means the model can never ask for a speed the
+     * mechanism cannot reach, and {@code Shooter/Saturated} flags when a shot is at the limit.
+     */
+    public static final double MAX_SHOT_RPM = MAX_MECHANICAL_RPM;
 
     /** Vision distances outside this window are rejected as bad measurements. */
     public static final double MIN_VALID_DISTANCE_METERS = 0.8;
@@ -126,6 +151,19 @@ public final class Constants
      */
     public static final double ENCODER_OFFSET_DEGREES = 0.0;
 
+    /**
+     * Robot-frame direction the shooter points when the turret encoder reads zero, CCW-positive.
+     * 0 would be straight out the front; 180 is straight out the back.
+     *
+     * <p>The turret is mounted at the BACK and shoots rearward, so its zero is 180 degrees from
+     * robot forward. The aim solve produces a robot-frame direction, and this is what converts it
+     * into an encoder angle. Without it every commanded angle was 180 degrees out, and since the
+     * turret only travels +/-90 those commands clamped at a soft limit instead of aiming.
+     *
+     * <p>This is the same 180 already baked into {@code getRobotAdjustedAngle()}.
+     */
+    public static final double ZERO_ROBOT_DIRECTION_DEGREES = 180.0;
+
     /** Distance from the pivot axis to the ball exit, along the turret aim direction. */
     public static final double SHOOTER_EXIT_RADIUS_METERS = Units.inchesToMeters(10.0);
 
@@ -145,14 +183,14 @@ public final class Constants
     public static final int kRollerMotorId = 41; // temporary values, will need to be updated when intake is implemented
 
     /**
-     * Master switch for the intake. TEMPORARILY DISABLED — set back to true to restore it.
+     * Master switch for the intake.
      *
      * <p>While false, nothing anywhere commands the intake: the operator bindings are not
      * registered, the default command actively holds both motors at zero, the pivot bounce is
      * dropped from the feed sequence, and autonomous skips the collection step. Flipping this one
      * value back to true restores every one of those in place.
      */
-    public static final boolean ENABLED = false;
+    public static final boolean ENABLED = true;
   }
 
     // Limelight values for limelight
@@ -168,7 +206,7 @@ public final class Constants
        * that pipeline, and if it is not actually the AprilTag one the Limelight goes blind with no
        * obvious cause. Only set a real number here once you have confirmed the index in the web UI.
        */
-      public static final int APRILTAG_PIPELINE = -1;
+      public static final int APRILTAG_PIPELINE = 0;
 
       // ---- Mounting pose (MEASURE THESE ON THE REAL ROBOT) -------------------
       // Lens position in the robot frame: +X forward, +Y left, +Z up. The camera is bolted to the
@@ -180,11 +218,22 @@ public final class Constants
       public static final double MOUNT_FORWARD_METERS = -0.205;
 
       /**
-       * Lens distance LEFT of robot center. The camera sits to the right of the turret pivot and
-       * the pivot is on the centerline, so this is negative. Matches the 9 in lateral offset
-       * already measured on the robot.
+       * Lens distance LEFT of robot centre, in the robot frame.
+       *
+       * <p><b>Sign convention, stated unambiguously because this was wrong:</b> stand at the FRONT
+       * of the robot (the end WITHOUT the turret) and look toward the back. +Y, and therefore a
+       * positive value here, is to YOUR LEFT. Measuring from the back of the robot — the natural
+       * side to stand on, since that is where the turret and camera are — reverses left and right,
+       * and that is exactly how this ended up with the wrong sign.
+       *
+       * <p>The error it caused is a clean 2x: the solver placed the lens 8.5 in to one side while
+       * it was really 8.5 in to the other, so the computed aim point sat 17 in (1.4 ft) off the
+       * real tag, and the turret pointed there. A lateral miss of roughly double the mounting
+       * offset, independent of range, is the signature of this sign being backwards.
+       *
+       * <p>If the turret now misses by the same amount in the OPPOSITE direction, flip this back.
        */
-      public static final double MOUNT_LEFT_METERS = -Units.inchesToMeters(9.0);
+      public static final double MOUNT_LEFT_METERS = Units.inchesToMeters(8.5);
 
       /** Lens height above the carpet. */
       public static final double MOUNT_HEIGHT_METERS = Units.inchesToMeters(20.0);
@@ -193,7 +242,16 @@ public final class Constants
       public static final double MOUNT_PITCH_DEGREES = 20.0;
 
       /** Camera yaw. POSITIVE means the lens is rotated CCW (toward robot left) from straight ahead. */
-      public static final double MOUNT_YAW_DEGREES = 0.0;
+      /**
+       * Camera yaw in the robot frame, CCW-positive. 0 looks out the FRONT, 180 looks out the BACK.
+       *
+       * <p>180 because the Limelight faces the same way as the turret, out the back of the robot.
+       * This was 0, which placed every detected tag in FRONT of the robot — a 180 degree error in
+       * the aim solve. The rotation also handles handedness: facing backwards, a tag to the
+       * camera's right is on the robot's LEFT, and {@code bearing = MOUNT_YAW - tx} gets that right
+       * without any extra sign flipping.
+       */
+      public static final double MOUNT_YAW_DEGREES = 180.0;
 
       /** Height of the HUB AprilTag centers, from the official 2026 field layout. */
       public static final double HUB_TAG_HEIGHT_METERS = frc.robot.vision.TagFunction.HUB.heightMeters();
