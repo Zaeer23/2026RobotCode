@@ -289,9 +289,16 @@ public Command manualTurretControl(Supplier<Double> speedSupplier) {
     return new DriveAlignCommand(drivebase, camera).withName("Superstructure.alignDriveToTag");
   }
 
-  /** Range from the shooter exit to the alliance HUB, or -1 when no hub tag is visible. */
+  /**
+   * Range from the shooter exit to the HUB, or -1 when no HUB tag is visible.
+   *
+   * <p>Ranges off {@code getHubTarget()}, not {@code getTarget()}. The trench is plastered with
+   * AprilTags and we shoot from right beside it, so the nearest tag is frequently a TRENCH tag.
+   * Ranging off that hands the shot table the distance to the tunnel we are standing next to, and
+   * the flywheel spins for a target metres closer than the hub actually is.
+   */
   public double getHubDistanceMeters() {
-    return camera.getTarget().map(tag -> {
+    return camera.getHubTarget().map(tag -> {
       // Measure from where the ball actually leaves, not from the lens.
       //
       // tag.rangeMeters is LENS-to-tag, and the lens is neither at robot centre nor at the
@@ -313,9 +320,15 @@ public Command manualTurretControl(Supplier<Double> speedSupplier) {
     }).orElse(-1.0);
   }
 
-  /** True when a HUB tag for this alliance is currently in view. */
+  /**
+   * True when an actual HUB tag is in view.
+   *
+   * <p>This was {@code camera.getTarget().isPresent()}, which means "sees any tag at all" — the
+   * name was a lie. It is what decides whether an auto takes the vision shot or the blind one, so
+   * a trench tag in view was enough to commit to a vision shot ranged off the trench.
+   */
   public boolean seesHub() {
-    return camera.getTarget().isPresent();
+    return camera.hasHubTarget();
   }
 
   /**

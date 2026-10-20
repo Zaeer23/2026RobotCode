@@ -146,6 +146,30 @@ public class Limelight extends SubsystemBase {
     return lockedTarget.isPresent();
   }
 
+  /**
+   * The nearest visible HUB tag, ignoring every other tag on the field.
+   *
+   * <p>This exists because {@link #getTarget()} will happily hand back a TRENCH tag. The trench is
+   * a structure covered in AprilTags that we deliberately park right next to in the neutral zone,
+   * so from a shooting position its tags are closer and squarer to the camera than the hub's. Aim
+   * and range taken from {@link #getTarget()} there would point the turret at the trench and
+   * compute the distance to it, and the robot would fire into the side of the tunnel.
+   *
+   * <p>Deliberately not restricted to our own alliance's hub. Filtering by alliance is what made
+   * the turret ignore a tag that was being held up in front of it during testing, and either hub
+   * is a real hub, at a real HUB mounting height, so the ranging is correct for both.
+   */
+  public Optional<VisionTarget> getHubTarget() {
+    return visibleTargets.stream()
+        .filter(target -> FieldTags.functionOf(target.id).isScoringTarget())
+        .findFirst();
+  }
+
+  /** True when an actual HUB tag is in view, as opposed to any tag at all. */
+  public boolean hasHubTarget() {
+    return getHubTarget().isPresent();
+  }
+
   /** Chooses which tags are eligible to be aimed at. */
   public void setTargetFilter(TargetFilter newFilter) {
     if (newFilter != filter) {

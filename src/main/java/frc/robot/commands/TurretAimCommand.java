@@ -71,7 +71,19 @@ public class TurretAimCommand extends Command {
 
   @Override
   public void execute() {
-    Optional<VisionTarget> target = camera.getTarget();
+    // A HUB tag wins over anything else in view.
+    //
+    // The trench is a structure covered in AprilTags, and every auto parks beside it to shoot, so
+    // a trench tag is routinely the nearest and squarest thing the camera can see. Taking the
+    // plain locked target there aims the turret at the tunnel wall.
+    //
+    // The fallback to getTarget() is deliberate rather than tidy: with no hub in view the turret
+    // still tracks whatever tag it has, which is what makes bench testing with a tag held up in
+    // front of the robot work at all.
+    Optional<VisionTarget> target = camera.getHubTarget();
+    if (target.isEmpty()) {
+      target = camera.getTarget();
+    }
 
     if (target.isEmpty()) {
       stopAndReportIdle();
