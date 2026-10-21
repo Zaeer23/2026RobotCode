@@ -5,19 +5,13 @@
     "data": {
       "commands": [
         {
-          "type": "named",
-          "data": {
-            "name": "Shoot"
-          }
-        },
-        {
           "type": "deadline",
           "data": {
             "commands": [
               {
                 "type": "path",
                 "data": {
-                  "pathName": "Trench Bot Enter"
+                  "pathName": "H Start Out to Neutral HX"
                 }
               },
               {
@@ -30,6 +24,12 @@
           }
         },
         {
+          "type": "path",
+          "data": {
+            "pathName": "Neutral HX to H Shot"
+          }
+        },
+        {
           "type": "named",
           "data": {
             "name": "Shoot"
@@ -42,7 +42,7 @@
               {
                 "type": "path",
                 "data": {
-                  "pathName": "Denial Sweep"
+                  "pathName": "H Shot to Depot"
                 }
               },
               {
@@ -52,6 +52,12 @@
                 }
               }
             ]
+          }
+        },
+        {
+          "type": "path",
+          "data": {
+            "pathName": "Depot Down to D Shot"
           }
         },
         {
@@ -70,6 +76,6 @@
     }
   },
   "resetOdom": true,
-  "folder": null,
+  "folder": "Rebuilt 20",
   "choreoAuto": false
 }

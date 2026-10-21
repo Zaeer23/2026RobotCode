@@ -31,19 +31,31 @@ import javazoom.jl.decoder.SampleBuffer;
  *
  * <p>Playback runs on its own daemon thread. Nothing here touches Swing directly; the UI passes in
  * callbacks and marshals to the EDT itself.
+ *
+ * <p>The player only knows its current queue. Which songs exist and which playlists they belong to
+ * is {@link MusicLibrary}'s job; the Music tab hands the player a playlist's songs when one is
+ * played.
  */
 public class MusicPlayer {
 
-  /** A track in the playlist. */
+  /** A track in the queue. Two tracks are the same if they are the same file. */
   public static class Track {
     public final File file;
     public final String title;
 
     Track(File file) {
       this.file = file;
-      String name = file.getName();
-      int dot = name.lastIndexOf('.');
-      this.title = dot > 0 ? name.substring(0, dot) : name;
+      this.title = MusicLibrary.title(file);
+    }
+
+    @Override
+    public boolean equals(Object other) {
+      return other instanceof Track && ((Track) other).file.equals(file);
+    }
+
+    @Override
+    public int hashCode() {
+      return file.hashCode();
     }
 
     @Override
@@ -56,6 +68,17 @@ public class MusicPlayer {
   private final List<Integer> shuffleOrder = new ArrayList<>();
 
   private int shufflePosition = -1;
+  /** Index in the queue of the current (or last) track. */
+  private int position = -1;
+  /** Index the user asked to play next, or -1. */
+  private int requested = -1;
+  /**
+   * Bumped every time playback is started or stopped. A playback thread that sees a different
+   * number than it started with has been replaced and quits, so a quick stop-then-play can never
+   * leave two songs playing over each other.
+   */
+  private volatile int generation = 0;
+  private volatile Track current;
   private volatile boolean playing = false;
   private volatile boolean paused = false;
   private volatile boolean skipRequested = false;
@@ -63,43 +86,68 @@ public class MusicPlayer {
   private volatile float volume = 0.6f;
 
   private Thread playbackThread;
-  private SourceDataLine line;
+  private volatile SourceDataLine line;
 
-  /** Latest decoded samples, for the visualiser. Mono, normalised to -1..1. */
-  private volatile float[] latestSamples = new float[0];
+  /**
+   * Every sample decoded for the current track, mono, in a ring. Decoding runs ahead of the sound
+   * card by however much the audio line buffers, so visualisers read from here at the line's
+   * actual playback position rather than taking the newest samples, which would put the picture
+   * a noticeable fraction of a second ahead of the music.
+   */
+  private final float[] ring = new float[1 << 16];
+  private long ringWritten = 0L;
+  private volatile long trackStartNanos = 0L;
+
+  /** Set with {@link #requested} when the pick should not reshuffle the play order. */
+  private boolean requestKeepsOrder = false;
 
   private Consumer<Track> onTrackChanged = t -> { };
   private Consumer<String> onError = e -> { };
 
-  // ---- Playlist -------------------------------------------------------------
+  // ---- Queue ----------------------------------------------------------------
 
-  /** Adds a file if it looks like audio we can decode. Returns false if not. */
-  public boolean addTrack(File file) {
-    if (file == null || !file.isFile()) {
-      return false;
+  /**
+   * Replaces the queue with these songs. Whatever is playing keeps playing until it ends or
+   * something else is picked; the next track comes from the new queue.
+   */
+  public synchronized void setQueue(List<File> files) {
+    playlist.clear();
+    for (File file : files) {
+      if (MusicLibrary.isPlayable(file)) {
+        playlist.add(new Track(file));
+      }
     }
-    String lower = file.getName().toLowerCase();
-    if (!lower.endsWith(".mp3")) {
-      return false;
-    }
-    playlist.add(new Track(file));
     reshuffle();
-    return true;
+    position = -1;
+    requested = -1;
   }
 
-  public void removeTrack(int index) {
-    if (index >= 0 && index < playlist.size()) {
-      playlist.remove(index);
-      reshuffle();
-    }
+  /** A snapshot of the queue. */
+  public synchronized List<Track> queue() {
+    return new ArrayList<>(playlist);
   }
 
-  public List<Track> playlist() {
-    return Collections.unmodifiableList(playlist);
-  }
-
-  public boolean isEmpty() {
+  public synchronized boolean isEmpty() {
     return playlist.isEmpty();
+  }
+
+  /** The track playing (or paused) now, or null. */
+  public Track currentTrack() {
+    return playing ? current : null;
+  }
+
+  /** Plays the queue's track at {@code index} straight away, interrupting whatever is playing. */
+  public synchronized void playAt(int index) {
+    if (index < 0 || index >= playlist.size()) {
+      return;
+    }
+    requested = index;
+    paused = false;
+    if (playing) {
+      skipRequested = true;
+    } else {
+      play();
+    }
   }
 
   /** Rebuilds the random order. Called whenever the playlist changes. */
@@ -135,7 +183,9 @@ public class MusicPlayer {
       return;
     }
     playing = true;
-    playbackThread = new Thread(this::playbackLoop, "music-player");
+    skipRequested = false;
+    int myGeneration = ++generation;
+    playbackThread = new Thread(() -> playbackLoop(myGeneration), "music-player");
     playbackThread.setDaemon(true);
     playbackThread.start();
   }
@@ -156,7 +206,30 @@ public class MusicPlayer {
     playing = false;
     paused = false;
     skipRequested = true;
-    latestSamples = new float[0];
+    generation++;
+    current = null;
+  }
+
+  /**
+   * Goes back a song, or to the start of this one if it has been playing for a few seconds, the
+   * way every music player's back button works.
+   */
+  public synchronized void previous() {
+    if (!playing || playlist.isEmpty()) {
+      return;
+    }
+    boolean restart = System.nanoTime() - trackStartNanos > 3_000_000_000L;
+    if (restart) {
+      requested = Math.max(0, position);
+      requestKeepsOrder = true;
+    } else if (shuffle) {
+      // nextTrack() steps forward one, so back two lands on the previous song.
+      shufflePosition = Math.max(-1, shufflePosition - 2);
+    } else {
+      position = Math.floorMod(position - 2, playlist.size());
+    }
+    paused = false;
+    skipRequested = true;
   }
 
   /** Skips to the next track. */
@@ -221,37 +294,89 @@ public class MusicPlayer {
 
   // ---- Visualiser feed ------------------------------------------------------
 
-  /** Most recent decoded samples, mono, -1..1. Empty when stopped. */
+  /** The samples being heard right now, mono, -1..1. Empty when stopped. */
   public float[] latestSamples() {
-    return latestSamples;
+    float[] window = new float[1152];
+    return read(window) ? window : new float[0];
   }
+
+  /**
+   * Fills {@code window} with the samples that end at the sound card's current playback position.
+   * Returns false, with silence, when nothing is playing or the music is paused.
+   */
+  public boolean read(float[] window) {
+    SourceDataLine current = line;
+    synchronized (ring) {
+      if (!playing || paused || current == null || ringWritten == 0) {
+        java.util.Arrays.fill(window, 0f);
+        return false;
+      }
+      long heard = Math.min(current.getLongFramePosition(), ringWritten);
+      long first = heard - window.length;
+      long oldest = ringWritten - ring.length;
+      for (int i = 0; i < window.length; i++) {
+        long index = first + i;
+        window[i] = index < 0 || index < oldest ? 0f : ring[(int) (index & (ring.length - 1))];
+      }
+      return true;
+    }
+  }
+
 
   // ---- Playback -------------------------------------------------------------
 
-  private void playbackLoop() {
-    while (playing) {
+  private void playbackLoop(int myGeneration) {
+    int failuresInARow = 0;
+    while (playing && myGeneration == generation) {
       Track track = nextTrack();
       if (track == null) {
         break;
       }
+      current = track;
       onTrackChanged.accept(track);
       try {
-        playTrack(track);
+        playTrack(track, myGeneration);
+        failuresInARow = 0;
       } catch (Exception e) {
         onError.accept("Could not play " + track.title + ": " + e.getMessage());
+        // A queue where nothing decodes would otherwise spin through it forever.
+        if (++failuresInARow >= Math.max(1, queue().size())) {
+          break;
+        }
       }
     }
-    playing = false;
-    latestSamples = new float[0];
+    if (myGeneration == generation) {
+      playing = false;
+      current = null;
+      }
   }
 
-  private Track nextTrack() {
+  private synchronized Track nextTrack() {
     if (playlist.isEmpty()) {
       return null;
     }
+
+    // A track the user picked comes first; the shuffle carries on from there.
+    if (requested >= 0 && requested < playlist.size()) {
+      position = requested;
+      requested = -1;
+      if (requestKeepsOrder) {
+        requestKeepsOrder = false;
+        return playlist.get(position);
+      }
+      if (shuffle) {
+        reshuffle();
+        shuffleOrder.remove(Integer.valueOf(position));
+        shuffleOrder.add(0, position);
+        shufflePosition = 0;
+      }
+      return playlist.get(position);
+    }
+    requested = -1;
+
     if (!shuffle) {
-      shufflePosition = (shufflePosition + 1) % playlist.size();
-      return playlist.get(shufflePosition);
+      position = (position + 1) % playlist.size();
+      return playlist.get(position);
     }
 
     shufflePosition++;
@@ -263,13 +388,15 @@ public class MusicPlayer {
     if (shuffleOrder.isEmpty()) {
       return null;
     }
-    int index = shuffleOrder.get(Math.min(shufflePosition, shuffleOrder.size() - 1));
-    return playlist.get(Math.min(index, playlist.size() - 1));
+    position = Math.min(shuffleOrder.get(shufflePosition), playlist.size() - 1);
+    return playlist.get(position);
   }
 
   /** Decodes one file frame by frame, writing PCM out and publishing samples as it goes. */
-  private void playTrack(Track track) throws Exception {
+  private void playTrack(Track track, int myGeneration) throws Exception {
     skipRequested = false;
+    boolean cutShort = false;
+    int frames = 0;
 
     try (InputStream in = new BufferedInputStream(new FileInputStream(track.file), 64 * 1024)) {
       Bitstream bitstream = new Bitstream(in);
@@ -279,10 +406,11 @@ public class MusicPlayer {
       try {
         Header header;
         while ((header = bitstream.readFrame()) != null) {
-          if (!playing || skipRequested) {
+          if (!playing || skipRequested || myGeneration != generation) {
+            cutShort = true;
             break;
           }
-          while (paused && playing && !skipRequested) {
+          while (paused && playing && !skipRequested && myGeneration == generation) {
             Thread.sleep(50);
           }
 
@@ -291,6 +419,10 @@ public class MusicPlayer {
           int sampleCount = output.getBufferLength();
 
           if (line == null) {
+            synchronized (ring) {
+              ringWritten = 0L;
+            }
+            trackStartNanos = System.nanoTime();
             line = openLine(output.getSampleFrequency(), output.getChannelCount());
             applyVolume();
           }
@@ -298,10 +430,21 @@ public class MusicPlayer {
           publishSamples(pcm, sampleCount, output.getChannelCount());
           line.write(toBytes(pcm, sampleCount), 0, sampleCount * 2);
           bitstream.closeFrame();
+          frames++;
+        }
+        // An empty or corrupt file "finishes" instantly. Treated as a failure, so a queue of
+        // them stops instead of spinning through itself forever.
+        if (frames == 0 && !cutShort) {
+          throw new java.io.IOException("not a playable MP3");
         }
       } finally {
         if (line != null) {
-          line.drain();
+          // A skipped or stopped song stops now; one that ended plays out its last buffer.
+          if (cutShort) {
+            line.flush();
+          } else {
+            line.drain();
+          }
           line.close();
           line = null;
         }
@@ -332,7 +475,12 @@ public class MusicPlayer {
         mono[i] = pcm[i] / 32768f;
       }
     }
-    latestSamples = mono;
+    synchronized (ring) {
+      for (float sample : mono) {
+        ring[(int) (ringWritten & (ring.length - 1))] = sample;
+        ringWritten++;
+      }
+    }
   }
 
   private static byte[] toBytes(short[] pcm, int count) {

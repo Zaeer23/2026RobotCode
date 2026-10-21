@@ -120,7 +120,15 @@ tasks.withType(JavaCompile) {
 // ---------------------------------------------------------------------------
 sourceSets {
     dashboard {
-        java.srcDir 'src/dashboard/java'
+        java {
+            srcDir 'src/dashboard/java'
+            // One robot class is shared: the auto preview builder. With it the dashboard draws
+            // routines from this project's own deploy folder when no robot is connected, using
+            // exactly the code the robot uses. It depends only on libraries, never on robot code.
+            srcDir 'src/main/java'
+            include 'frc/dashboard/**'
+            include 'frc/robot/auto/AutoPreviewBuilder.java'
+        }
         resources.srcDir 'src/dashboard/resources'
         compileClasspath += sourceSets.main.compileClasspath
         runtimeClasspath += sourceSets.main.runtimeClasspath
@@ -131,6 +139,10 @@ dependencies {
     // Pure-Java MP3 decoder. Decoding to PCM ourselves (rather than using a black-box player)
     // is what makes both the volume control and the visualiser possible: we hold the samples.
     dashboardImplementation 'javazoom:jlayer:1.0.1'
+    // Modern flat look-and-feel for Swing. Gives every stock control (combo boxes, lists, tabs,
+    // scrollbars, the title bar) the dark, rounded styling the custom-painted panels use, so the
+    // whole window reads as one app instead of Windows 98 controls around a custom dashboard.
+    dashboardImplementation 'com.formdev:flatlaf:3.5.4'
     dashboardImplementation wpi.java.deps.wpilib()
     dashboardImplementation wpi.java.vendor.java()
 
@@ -138,6 +150,10 @@ dependencies {
     // throws "ntcorejni could not be loaded from path" the moment it starts.
     dashboardRuntimeOnly wpi.java.deps.wpilibJniRelease(wpi.platforms.desktop)
 }
+
+// The dashboard's sources use characters like the degree sign and middle dot in on-screen text.
+// Without this, javac on Windows reads them as cp1252 and the screen shows mojibake.
+compileDashboardJava.options.encoding = 'UTF-8'
 
 task dashboard(type: JavaExec) {
     group = 'robot'

@@ -4,7 +4,6 @@ import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Font;
-import java.awt.GridLayout;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -39,12 +38,8 @@ import edu.wpi.first.networktables.NetworkTable;
  */
 public class BindingEditor extends JPanel {
 
-  private static final Color BG = new Color(0x13, 0x15, 0x19);
-  private static final Color PANEL = new Color(0x1C, 0x1F, 0x26);
-  private static final Color TEXT = new Color(0xD8, 0xDC, 0xE2);
-  private static final Color DIM = new Color(0x8A, 0x90, 0x98);
-  private static final Color ACCENT = new Color(0x4C, 0xC2, 0xFF);
-  private static final Color GOOD = new Color(0x3D, 0xDC, 0x84);
+  private static final Color TEXT = Theme.TEXT;
+  private static final Color GOOD = Theme.GOOD;
 
   private final NetworkTable controls;
 
@@ -62,23 +57,25 @@ public class BindingEditor extends JPanel {
 
   public BindingEditor(NetworkTable controls) {
     this.controls = controls;
-    setLayout(new BorderLayout(10, 10));
-    setBackground(BG);
+    setLayout(new BorderLayout(16, 10));
+    setOpaque(false);
 
     add(buildActionPicker(), BorderLayout.WEST);
     add(buildAssignment(), BorderLayout.CENTER);
   }
 
   private JPanel buildActionPicker() {
-    JPanel panel = new JPanel(new BorderLayout(0, 6));
-    panel.setBackground(BG);
-    panel.setPreferredSize(new Dimension(230, 240));
+    JPanel panel = new JPanel(new BorderLayout(0, 8));
+    panel.setOpaque(false);
+    panel.setPreferredSize(new Dimension(260, 240));
 
-    JLabel caption = new JLabel("ACTION");
-    caption.setForeground(DIM);
-    caption.setFont(new Font("Segoe UI", Font.BOLD, 10));
+    JLabel caption = Ui.caption("Action");
 
     search.setToolTipText("Type to filter actions");
+    search.putClientProperty(com.formdev.flatlaf.FlatClientProperties.PLACEHOLDER_TEXT,
+        "Search actions…");
+    search.putClientProperty(com.formdev.flatlaf.FlatClientProperties.TEXT_FIELD_SHOW_CLEAR_BUTTON,
+        true);
     search.getDocument().addDocumentListener(new DocumentListener() {
       @Override public void insertUpdate(DocumentEvent e) {
         applyFilter();
@@ -94,57 +91,55 @@ public class BindingEditor extends JPanel {
     });
 
     actionList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-    actionList.setBackground(PANEL);
+    actionList.setBackground(Theme.SURFACE_RAISED);
     actionList.setForeground(TEXT);
+    actionList.setFont(Theme.ui(Font.PLAIN, 12.5f));
     actionList.addListSelectionListener(e -> {
       if (!e.getValueIsAdjusting()) {
         showCurrentBinding();
       }
     });
 
-    JPanel top = new JPanel(new BorderLayout(0, 4));
-    top.setBackground(BG);
+    JPanel top = new JPanel(new BorderLayout(0, 6));
+    top.setOpaque(false);
     top.add(caption, BorderLayout.NORTH);
     top.add(search, BorderLayout.SOUTH);
 
+    JScrollPane scroll = new JScrollPane(actionList);
+    scroll.setBorder(BorderFactory.createLineBorder(Theme.BORDER_STRONG));
     panel.add(top, BorderLayout.NORTH);
-    panel.add(new JScrollPane(actionList), BorderLayout.CENTER);
+    panel.add(scroll, BorderLayout.CENTER);
     return panel;
   }
 
   private JPanel buildAssignment() {
     JPanel panel = new JPanel();
     panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-    panel.setBackground(BG);
+    panel.setOpaque(false);
 
-    JLabel caption = new JLabel("ASSIGN TO");
-    caption.setForeground(DIM);
-    caption.setFont(new Font("Segoe UI", Font.BOLD, 10));
+    JLabel caption = Ui.caption("Assign to");
     caption.setAlignmentX(LEFT_ALIGNMENT);
     panel.add(caption);
-    panel.add(Box.createVerticalStrut(6));
+    panel.add(Box.createVerticalStrut(8));
 
     panel.add(row("Controller", roleBox));
     panel.add(row("Button", inputBox));
     panel.add(row("Hold with", modifierBox));
 
-    JLabel comboNote = new JLabel(
-        "<html><body style='width:300px'>\"Hold with\" combines two buttons into one binding. "
-            + "Set it to NONE for a plain single-button press.</body></html>");
-    comboNote.setForeground(DIM);
-    comboNote.setFont(new Font("Segoe UI", Font.PLAIN, 10));
+    JLabel comboNote = Ui.note("\"Hold with\" combines two buttons into one binding. "
+        + "Set it to NONE for a plain single-button press.", 320);
     comboNote.setAlignmentX(LEFT_ALIGNMENT);
     panel.add(Box.createVerticalStrut(4));
     panel.add(comboNote);
 
-    JButton apply = new JButton("Apply binding");
+    JButton apply = Ui.primary("Apply binding", Icons.check(14, Theme.TEXT_ON_ACCENT));
     apply.setAlignmentX(LEFT_ALIGNMENT);
     apply.addActionListener(e -> applyBinding());
     panel.add(Box.createVerticalStrut(10));
     panel.add(apply);
 
     statusLabel.setForeground(GOOD);
-    statusLabel.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+    statusLabel.setFont(Theme.ui(Font.PLAIN, 12f));
     statusLabel.setAlignmentX(LEFT_ALIGNMENT);
     panel.add(Box.createVerticalStrut(8));
     panel.add(statusLabel);
@@ -154,14 +149,15 @@ public class BindingEditor extends JPanel {
   }
 
   private JPanel row(String caption, java.awt.Component field) {
-    JPanel row = new JPanel(new GridLayout(1, 2, 8, 0));
-    row.setBackground(BG);
+    JPanel row = new JPanel(new BorderLayout(10, 0));
+    row.setOpaque(false);
     row.setAlignmentX(LEFT_ALIGNMENT);
-    row.setMaximumSize(new Dimension(360, 28));
-    JLabel label = new JLabel(caption);
-    label.setForeground(TEXT);
-    row.add(label);
-    row.add(field);
+    row.setMaximumSize(new Dimension(380, 34));
+    row.setBorder(BorderFactory.createEmptyBorder(0, 0, 6, 0));
+    JLabel label = Ui.label(caption, Theme.ui(Font.PLAIN, 13f), TEXT);
+    label.setPreferredSize(new Dimension(90, 28));
+    row.add(label, BorderLayout.WEST);
+    row.add(field, BorderLayout.CENTER);
     return row;
   }
 

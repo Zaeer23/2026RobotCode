@@ -137,6 +137,9 @@ public class DashboardTelemetry {
     table.getEntry("MatchTime").setDouble(DriverStation.getMatchTime());
     table.getEntry("Enabled").setBoolean(DriverStation.isEnabled());
     table.getEntry("Autonomous").setBoolean(DriverStation.isAutonomous());
+    table.getEntry("Mode").setString(
+        DriverStation.isTest() ? "TEST" : DriverStation.isAutonomous() ? "AUTO" : "TELEOP");
+    table.getEntry("FMSAttached").setBoolean(DriverStation.isFMSAttached());
     table.getEntry("Alliance").setString(
         DriverStation.getAlliance().map(Enum::name).orElse("UNKNOWN"));
     table.getEntry("BatteryVolts").setDouble(RobotController.getBatteryVoltage());

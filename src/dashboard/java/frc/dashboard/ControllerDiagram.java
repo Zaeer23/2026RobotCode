@@ -7,7 +7,6 @@ import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Point;
-import java.awt.RenderingHints;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.Area;
 import java.awt.geom.Ellipse2D;
@@ -28,28 +27,39 @@ import javax.swing.event.MouseInputAdapter;
  * which makes the picture actively misleading — the whole value of a diagram over a list is that
  * it maps onto the thing in your hands without translation.
  *
- * <p>Bound inputs are lit and labelled; free ones are dim. Labels sit outside whichever half of
- * the body the control is on, so they never cover the pad or a neighbouring button. Clicking
- * selects an input, which is how the editor beside it chooses what to rebind.
+ * <p>Bound inputs are lit and labelled; free ones are dim. Labels sit in a column beside whichever
+ * half of the body the control is on, joined to it by a leader line, so they never cover the pad
+ * or a neighbouring button even when the face buttons are all bound. Clicking selects an input,
+ * which is how the editor beside it chooses what to rebind.
  */
 public class ControllerDiagram extends JPanel {
 
-  private static final Color BG = new Color(0x1C, 0x1F, 0x26);
-  private static final Color BODY = new Color(0x2E, 0x33, 0x3C);
-  private static final Color BODY_EDGE = new Color(0x45, 0x4C, 0x58);
-  private static final Color WELL = new Color(0x23, 0x27, 0x2E);
-  private static final Color FREE = new Color(0x51, 0x58, 0x63);
-  private static final Color BOUND = new Color(0x4C, 0xC2, 0xFF);
-  private static final Color SELECTED = new Color(0x3D, 0xDC, 0x84);
-  private static final Color LABEL = new Color(0xC8, 0xCE, 0xD6);
-  private static final Color DIM = new Color(0x8A, 0x90, 0x98);
+  private static final Color INK = Theme.TEXT_ON_ACCENT;
+  private static final Color BODY = new Color(0x262C37);
+  private static final Color BODY_EDGE = new Color(0x3C4452);
+  private static final Color WELL = new Color(0x1C2129);
+  private static final Color FREE = new Color(0x4B5362);
+  private static final Color BOUND = Theme.ACCENT;
+  private static final Color SELECTED = Theme.GOOD;
+  private static final Color LABEL = Theme.TEXT;
+  private static final Color DIM = Theme.TEXT_DIM;
 
   /** Reference canvas. All geometry below is in these coordinates, scaled to fit the panel. */
-  private static final int REF_W = 460;
+  private static final int REF_W = 600;
   private static final int REF_H = 300;
+
+  /** The pad is drawn this far in from the left, leaving a label column either side of it. */
+  private static final int SHIFT = 70;
 
   /** Centre line of the pad, used to decide which side a label goes on. */
   private static final int CENTRE_X = 230;
+
+  /** Label columns, in pad coordinates: just outside the body on each side. */
+  private static final int LEFT_COLUMN = 84;
+  private static final int RIGHT_COLUMN = 376;
+
+  /** Minimum vertical spacing between two labels in the same column. */
+  private static final int LABEL_SPACING = 17;
 
   private static final Map<String, Point> LAYOUT = new LinkedHashMap<>();
 
@@ -88,7 +98,8 @@ public class ControllerDiagram extends JPanel {
 
   public ControllerDiagram() {
     setPreferredSize(new Dimension(REF_W, REF_H));
-    setBackground(BG);
+    setOpaque(false);
+    setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
 
     addMouseListener(new MouseInputAdapter() {
       @Override
@@ -136,7 +147,7 @@ public class ControllerDiagram extends JPanel {
   private String inputAt(int x, int y) {
     double s = scale();
     for (Map.Entry<String, Point> entry : LAYOUT.entrySet()) {
-      double px = offsetX() + entry.getValue().x * s;
+      double px = offsetX() + (entry.getValue().x + SHIFT) * s;
       double py = offsetY() + entry.getValue().y * s;
       double r = 14 * s;
       if ((x - px) * (x - px) + (y - py) * (y - py) <= r * r) {
@@ -150,18 +161,20 @@ public class ControllerDiagram extends JPanel {
   protected void paintComponent(Graphics g) {
     super.paintComponent(g);
     Graphics2D g2 = (Graphics2D) g.create();
-    g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+    Theme.smooth(g2);
 
     g2.translate(offsetX(), offsetY());
     g2.scale(scale(), scale());
 
+    g2.setFont(Theme.caption(11f));
+    g2.setColor(DIM);
+    g2.drawString(title, 8, 16);
+
+    g2.translate(SHIFT, 0);
     drawBody(g2);
     drawWells(g2);
     drawInputs(g2);
-
-    g2.setFont(new Font("Segoe UI", Font.BOLD, 12));
-    g2.setColor(DIM);
-    g2.drawString(title, 8, 16);
+    drawLabels(g2);
 
     g2.dispose();
   }
@@ -217,34 +230,77 @@ public class ControllerDiagram extends JPanel {
       g2.setColor(isSelected ? SELECTED : (isBound ? BOUND : FREE));
       g2.fillOval(at.x - r, at.y - r, r * 2, r * 2);
 
-      g2.setColor(BG);
-      g2.setFont(new Font("Segoe UI", Font.BOLD, r >= 13 ? 10 : 9));
+      g2.setColor(INK);
+      g2.setFont(Theme.ui(Font.BOLD, r >= 13 ? 10f : 9f));
       String shortName = shortLabel(input);
       int tw = g2.getFontMetrics().stringWidth(shortName);
       g2.drawString(shortName, at.x - tw / 2, at.y + 4);
 
-      if (isBound) {
-        drawActionLabel(g2, at, action);
-      }
     }
   }
 
   /**
-   * Action name placed outside the body.
+   * Action names in a column beside each half of the pad, each joined to its button.
    *
-   * <p>Left-half controls label leftwards and right-half controls rightwards, so text never lands
-   * on the pad or on a neighbouring button.
+   * <p>Labels are stacked top to bottom in the order of their buttons and nudged apart where two
+   * buttons sit at nearly the same height (X and B, say), so none overlap.
    */
-  private void drawActionLabel(Graphics2D g2, Point at, String action) {
-    g2.setColor(LABEL);
-    g2.setFont(new Font("Segoe UI", Font.PLAIN, 9));
+  private void drawLabels(Graphics2D g2) {
+    java.util.List<String> left = new java.util.ArrayList<>();
+    java.util.List<String> right = new java.util.ArrayList<>();
+    for (String input : LAYOUT.keySet()) {
+      if (bindingsByInput.containsKey(input)) {
+        (LAYOUT.get(input).x < CENTRE_X ? left : right).add(input);
+      }
+    }
+    drawColumn(g2, left, true);
+    drawColumn(g2, right, false);
+  }
 
-    String label = action.length() > 18 ? action.substring(0, 17) + "..." : action;
-    int textWidth = g2.getFontMetrics().stringWidth(label);
-    boolean onLeft = at.x < CENTRE_X;
+  private void drawColumn(Graphics2D g2, java.util.List<String> inputs, boolean onLeft) {
+    inputs.sort(java.util.Comparator.comparingInt((String input) -> LAYOUT.get(input).y)
+        .thenComparingInt(input -> onLeft ? LAYOUT.get(input).x : -LAYOUT.get(input).x));
 
-    int x = onLeft ? at.x - 16 - textWidth : at.x + 16;
-    g2.drawString(label, x, at.y + 3);
+    int[] ys = new int[inputs.size()];
+    for (int i = 0; i < inputs.size(); i++) {
+      int want = LAYOUT.get(inputs.get(i)).y;
+      ys[i] = i == 0 ? want : Math.max(want, ys[i - 1] + LABEL_SPACING);
+    }
+    // If the stack ran off the bottom, push it back up, keeping the spacing.
+    int bottom = REF_H - 8;
+    for (int i = ys.length - 1; i >= 0; i--) {
+      if (ys[i] > bottom) {
+        ys[i] = bottom;
+      }
+      bottom = ys[i] - LABEL_SPACING;
+    }
+
+    g2.setFont(Theme.ui(Font.PLAIN, 12.5f));
+    java.awt.FontMetrics fm = g2.getFontMetrics();
+    int maxWidth = onLeft ? LEFT_COLUMN + SHIFT - 10 : REF_W - SHIFT - RIGHT_COLUMN - 10;
+
+    for (int i = 0; i < inputs.size(); i++) {
+      String input = inputs.get(i);
+      Point at = LAYOUT.get(input);
+      boolean selected = input.equals(selectedInput);
+      int r = radiusFor(input);
+      int y = ys[i];
+
+      String label = StatTile.ellipsize(fm, bindingsByInput.get(input), maxWidth);
+      int width = fm.stringWidth(label);
+      int textX = onLeft ? LEFT_COLUMN - width : RIGHT_COLUMN;
+      int lineEnd = onLeft ? LEFT_COLUMN + 4 : RIGHT_COLUMN - 4;
+      int lineStart = onLeft ? at.x - r - 2 : at.x + r + 2;
+      int elbow = onLeft ? Math.min(lineStart - 6, lineEnd + 12) : Math.max(lineStart + 6, lineEnd - 12);
+
+      g2.setColor(Theme.alpha(selected ? SELECTED : BOUND, 120));
+      g2.setStroke(new BasicStroke(1f));
+      g2.drawLine(lineStart, at.y, elbow, y);
+      g2.drawLine(elbow, y, lineEnd, y);
+
+      g2.setColor(selected ? SELECTED : LABEL);
+      g2.drawString(label, textX, y + 5);
+    }
   }
 
   /** Sticks are drawn larger than buttons, matching the real pad. */

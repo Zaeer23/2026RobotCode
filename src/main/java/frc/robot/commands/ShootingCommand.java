@@ -1,13 +1,49 @@
 package frc.robot.commands;
 
+import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.SequentialCommandGroup;
-import frc.robot.subsystems.Superstructure;
+import frc.robot.subsystems.HopperSubsystem;
+import frc.robot.subsystems.KickerSubsystem;
+import frc.robot.subsystems.ShooterSubsystem;
 
-/** Bounded autonomous shot using the same speed recovery and intake clearance checks as teleop. */
 public class ShootingCommand extends SequentialCommandGroup {
-  private static final double SHOT_TIMEOUT_SECONDS = 7.5;
+  private static final double SPINUP_SECONDS = 1.50;
+  /**
+   * Was 17 seconds — longer than the entire 15 second autonomous period, so the sequence could
+   * never reach the steps after it and the shooter never stopped on its own.
+   */
+  private static final double FIRST_FEED_SECONDS = 6.0;
+  private static final double STOP_BACKFEED_SECONDS = 1.00;
+  private static final double SECOND_FEED_SECONDS = 1.00;
 
-  public ShootingCommand(Superstructure superstructure) {
-    addCommands(superstructure.shootWhenReadyCommand().withTimeout(SHOT_TIMEOUT_SECONDS));
+  /** How long the timed steps take end to end. The auto preview's timeline uses it. */
+  public static final double TOTAL_SECONDS =
+      SPINUP_SECONDS + FIRST_FEED_SECONDS + STOP_BACKFEED_SECONDS;
+
+  public ShootingCommand(
+      ShooterSubsystem shooter,
+      KickerSubsystem kicker,
+      HopperSubsystem hopper) {
+    addCommands(
+        Commands.deadline(
+            Commands.waitSeconds(SPINUP_SECONDS),
+            shooter.spinUp()),
+        Commands.deadline(
+            Commands.waitSeconds(FIRST_FEED_SECONDS),
+            shooter.spinUp(),
+            kicker.feedCommand(),
+            hopper.feedCommand()),
+        
+        Commands.deadline(
+            Commands.waitSeconds(STOP_BACKFEED_SECONDS),
+            shooter.spinUp(),
+            kicker.stopCommand(),
+            hopper.stopCommand()),
+        
+        
+        Commands.parallel(
+            shooter.stop(),
+            kicker.stopCommand(),
+            hopper.stopCommand()));
   }
 }

@@ -1,10 +1,15 @@
 package frc.dashboard;
 
+import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Dimension;
+import java.awt.Font;
+import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
+import java.awt.geom.Ellipse2D;
+import java.awt.geom.RoundRectangle2D;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.BufferedInputStream;
@@ -31,8 +36,7 @@ import javax.swing.SwingUtilities;
  */
 public class CameraView extends JPanel {
 
-  private static final Color BACKGROUND = new Color(0x1E, 0x20, 0x24);
-  private static final Color TEXT = new Color(0x9A, 0xA0, 0xA8);
+  private static final Color BACKGROUND = new Color(0x0C, 0x0F, 0x13);
 
   private static final byte[] JPEG_START = {(byte) 0xFF, (byte) 0xD8};
   private static final byte[] JPEG_END = {(byte) 0xFF, (byte) 0xD9};
@@ -40,7 +44,11 @@ public class CameraView extends JPanel {
   private volatile java.util.List<String> candidates = java.util.List.of();
   private volatile String url = "";
   private volatile BufferedImage frame;
-  private volatile String status = "no stream";
+  private volatile String status = "Waiting for the robot";
+
+  /** Arrival times of recent frames, for the frame-rate readout. */
+  private final long[] frameTimes = new long[30];
+  private int frameCount = 0;
   private final AtomicBoolean running = new AtomicBoolean(false);
 
   /**
@@ -62,7 +70,7 @@ public class CameraView extends JPanel {
 
   public CameraView() {
     setPreferredSize(new Dimension(320, 240));
-    setBackground(BACKGROUND);
+    setOpaque(false);
   }
 
   /** Points the view at a stream. Safe to call repeatedly with the same URL. */
@@ -101,7 +109,7 @@ public class CameraView extends JPanel {
           return;
         }
         try {
-          status = "trying " + hostOf(target);
+          status = "Trying " + hostOf(target) + "…";
           repaintSoon();
 
           HttpURLConnection connection =
@@ -128,7 +136,7 @@ public class CameraView extends JPanel {
       }
 
       if (!connectedToAny) {
-        status = "offline - no route to camera";
+        status = "No route to the camera. Retrying…";
         frame = null;
         repaintSoon();
         sleep(2000);
@@ -173,6 +181,10 @@ public class CameraView extends JPanel {
           if (decoded != null) {
             frame = decoded;
             status = "live";
+            synchronized (frameTimes) {
+              frameTimes[frameCount % frameTimes.length] = System.nanoTime();
+              frameCount++;
+            }
             repaintSoon();
           }
         }
@@ -198,18 +210,36 @@ public class CameraView extends JPanel {
     }
   }
 
+  /** Frames per second over the last second or so, or 0 when nothing is arriving. */
+  private double fps() {
+    synchronized (frameTimes) {
+      int n = Math.min(frameCount, frameTimes.length);
+      if (n < 2) {
+        return 0.0;
+      }
+      long newest = frameTimes[(frameCount - 1) % frameTimes.length];
+      long oldest = frameTimes[(frameCount - n) % frameTimes.length];
+      if (System.nanoTime() - newest > 1_500_000_000L || newest == oldest) {
+        return 0.0;
+      }
+      return (n - 1) / ((newest - oldest) / 1e9);
+    }
+  }
+
   @Override
   protected void paintComponent(Graphics g) {
-    super.paintComponent(g);
     Graphics2D g2 = (Graphics2D) g.create();
+    Theme.smooth(g2);
     g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
         RenderingHints.VALUE_INTERPOLATION_BILINEAR);
 
+    RoundRectangle2D frameShape = new RoundRectangle2D.Double(0, 0, getWidth(), getHeight(), 10, 10);
+    g2.setColor(BACKGROUND);
+    g2.fill(frameShape);
+
     BufferedImage current = frame;
     if (current == null) {
-      g2.setColor(TEXT);
-      String message = "Limelight: " + status;
-      g2.drawString(message, 10, getHeight() / 2);
+      drawOffline(g2);
       g2.dispose();
       return;
     }
@@ -220,7 +250,58 @@ public class CameraView extends JPanel {
         getHeight() / (double) current.getHeight());
     int w = (int) (current.getWidth() * scale);
     int h = (int) (current.getHeight() * scale);
+    java.awt.Shape clip = g2.getClip();
+    g2.clip(frameShape);
     g2.drawImage(current, (getWidth() - w) / 2, (getHeight() - h) / 2, w, h, null);
+    g2.setClip(clip);
+
+    double fps = fps();
+    drawChip(g2, fps > 0 ? String.format("LIVE  ·  %.0f fps", fps) : "STALLED",
+        fps > 0 ? Theme.GOOD : Theme.WARN);
     g2.dispose();
+  }
+
+  /** A camera glyph and the current connection attempt, instead of a black rectangle. */
+  private void drawOffline(Graphics2D g2) {
+    double cx = getWidth() / 2.0;
+    double cy = getHeight() / 2.0 - 14;
+    g2.setColor(Theme.TEXT_FAINT);
+    g2.setStroke(new BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+    g2.draw(new RoundRectangle2D.Double(cx - 22, cy - 14, 34, 28, 8, 8));
+    java.awt.geom.Path2D lens = new java.awt.geom.Path2D.Double();
+    lens.moveTo(cx + 14, cy - 5);
+    lens.lineTo(cx + 24, cy - 11);
+    lens.lineTo(cx + 24, cy + 11);
+    lens.lineTo(cx + 14, cy + 5);
+    lens.closePath();
+    g2.draw(lens);
+    g2.fill(new Ellipse2D.Double(cx - 9, cy - 4, 8, 8));
+
+    g2.setFont(Theme.ui(Font.BOLD, 13f));
+    FontMetrics fm = g2.getFontMetrics();
+    String title = "No camera stream";
+    g2.setColor(Theme.TEXT_DIM);
+    g2.drawString(title, (float) (cx - fm.stringWidth(title) / 2.0), (float) (cy + 40));
+
+    g2.setFont(Theme.ui(Font.PLAIN, 12f));
+    fm = g2.getFontMetrics();
+    String detail = status;
+    g2.setColor(Theme.TEXT_FAINT);
+    g2.drawString(detail, (float) (cx - fm.stringWidth(detail) / 2.0), (float) (cy + 58));
+  }
+
+  private void drawChip(Graphics2D g2, String text, Color colour) {
+    g2.setFont(Theme.caption(10.5f));
+    FontMetrics fm = g2.getFontMetrics();
+    int w = fm.stringWidth(text) + 28;
+    int h = 22;
+    int x = 10;
+    int y = 10;
+    g2.setColor(new Color(0, 0, 0, 170));
+    g2.fill(new RoundRectangle2D.Double(x, y, w, h, h, h));
+    g2.setColor(colour);
+    g2.fill(new Ellipse2D.Double(x + 9, y + h / 2.0 - 3.5, 7, 7));
+    g2.setColor(Theme.TEXT);
+    g2.drawString(text, x + 21, y + (h + fm.getAscent() - fm.getDescent()) / 2);
   }
 }
