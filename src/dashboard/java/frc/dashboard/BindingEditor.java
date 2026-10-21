@@ -206,6 +206,53 @@ public class BindingEditor extends JPanel {
     statusLabel.setText(action + "  ->  " + binding);
   }
 
+  /**
+   * Points the editor at one physical button, as if the dropdowns had been set by hand.
+   *
+   * <p>This is what makes clicking the drawing actually do something. Before it existed the card
+   * told you to "click a button on a controller to select it" and nothing was listening, so the
+   * only way to rebind anything was to work the three dropdowns.
+   *
+   * <p>If something is already bound to that button, its action is selected in the list too, so a
+   * click answers "what is this button?" as well as starting a change to it.
+   */
+  public void selectTarget(String role, String input) {
+    roleBox.setSelectedItem(role);
+    inputBox.setSelectedItem(input);
+
+    String occupant = actionBoundTo(role, input);
+    if (occupant != null) {
+      if (!actionModel.contains(occupant)) {
+        search.setText("");
+      }
+      actionList.setSelectedValue(occupant, true);
+      statusLabel.setForeground(TEXT);
+      statusLabel.setText(input + " on " + role + " is " + occupant);
+    } else {
+      modifierBox.setSelectedItem("NONE");
+      statusLabel.setForeground(Theme.TEXT_DIM);
+      statusLabel.setText(input + " on " + role + " is free. Pick an action, then Apply.");
+    }
+  }
+
+  /** The action currently living on this role's input, or null when it is free. */
+  private String actionBoundTo(String role, String input) {
+    for (Map.Entry<String, String> entry : currentMap.entrySet()) {
+      String[] parts = entry.getValue().trim().split("\\s+");
+      if (parts.length < 2 || !parts[0].equalsIgnoreCase(role)) {
+        continue;
+      }
+      String spec = parts[1];
+      String primary = spec.contains("+")
+          ? spec.split(java.util.regex.Pattern.quote("+"), 2)[1]
+          : spec;
+      if (primary.equalsIgnoreCase(input)) {
+        return entry.getKey();
+      }
+    }
+    return null;
+  }
+
   private void applyBinding() {
     String action = actionList.getSelectedValue();
     if (action == null) {

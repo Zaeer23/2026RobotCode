@@ -188,8 +188,17 @@ private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
   private static final double BLIND_SPINUP_SECONDS = 1.2;
   private static final double BLIND_FEED_SECONDS = 1.5;
   private static final double AUTO_ALIGN_TIMEOUT_SECONDS = 2.0;
-  /** How long FeedCorral pushes FUEL out through the intake. Enough to empty the hopper. */
-  private static final double CORRAL_FEED_SECONDS = 2.0;
+  /** How long FeedOutpost pushes FUEL out through the intake. Enough to empty the hopper. */
+  private static final double OUTPOST_FEED_SECONDS = 2.0;
+
+  /**
+   * How long the robot stays parked at the OUTPOST after it finishes pushing.
+   *
+   * <p>The rollers stop but the drive stays X-locked. The HUMAN PLAYER needs a moment to actually
+   * collect what was pushed through, and driving off the instant the intake stops leaves FUEL
+   * sitting in the opening with nobody on it yet.
+   */
+  private static final double OUTPOST_DWELL_SECONDS = 1.0;
 
   /**
    * Commands the PathPlanner {@code .auto} files call by name.
@@ -207,18 +216,18 @@ private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
     NamedCommands.registerCommand(
         "AlignToHub",
         m_superstructure.alignDriveToTagCommand(drivebase).withTimeout(AUTO_ALIGN_TIMEOUT_SECONDS));
-    NamedCommands.registerCommand("FeedCorral", feedCorralCommand());
+    NamedCommands.registerCommand("FeedOutpost", feedOutpostCommand());
 
     // How long each one holds a routine up, for the dashboard's auto preview timeline. The rest
     // either finish instantly or only ever run alongside a path.
     autoCatalog.setStepSeconds("Shoot", AUTO_SHOT_TIMEOUT_SECONDS);
     autoCatalog.setStepSeconds("AlignToHub", AUTO_ALIGN_TIMEOUT_SECONDS);
-    autoCatalog.setStepSeconds("FeedCorral", CORRAL_FEED_SECONDS);
+    autoCatalog.setStepSeconds("FeedOutpost", OUTPOST_FEED_SECONDS + OUTPOST_DWELL_SECONDS);
   }
 
   /**
    * Hands FUEL to the HUMAN PLAYER: pushes it out of the intake, through the opening at the base
-   * of the OUTPOST, into the CORRAL.
+   * of the OUTPOST, through the OUTPOST opening.
    *
    * <p>The paths park the robot squared against the OUTPOST with the intake facing it, centred on
    * the opening. G405 allows FUEL to leave the FIELD only this way. The HUMAN PLAYER can then throw
@@ -227,13 +236,19 @@ private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
    * <p>Runs the intake backwards with the hopper reversing behind it, so the hopper empties out the
    * front. X-locked like a shot, so the robot does not creep away from the opening while it pushes.
    */
-  private Command feedCorralCommand()
+  private Command feedOutpostCommand()
   {
     Command eject = Commands.parallel(
         m_superstructure.ejectCommand(),
         m_superstructure.hopperReverseCommand())
-        .withTimeout(CORRAL_FEED_SECONDS);
-    return Commands.deadline(eject, drivebase.holdStillCommand()).withName("Auto.FeedCorral");
+        .withTimeout(OUTPOST_FEED_SECONDS);
+
+    // Push, then sit still with the rollers off while the HUMAN PLAYER collects. Both halves are
+    // inside the same deadline so the X-lock is held across the whole visit, not just the push.
+    Command pushThenWait = eject.andThen(Commands.waitSeconds(OUTPOST_DWELL_SECONDS));
+
+    return Commands.deadline(pushThenWait, drivebase.holdStillCommand())
+        .withName("Auto.FeedOutpost");
   }
 
   /**
@@ -267,7 +282,7 @@ private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
     // "Hold" routines keep the 8 preloaded FUEL and shoot them with the first load, which saves a
     // whole shot's worth of time. "Chute" ones collect the 24 FUEL the HUMAN PLAYER releases from
     // the OUTPOST CHUTE at the start of AUTO, so tell them. "to HP" ones finish by feeding a load
-    // into the CORRAL for the HUMAN PLAYER.
+    // through the OUTPOST opening for the HUMAN PLAYER.
     autoCatalog.addPathPlanner(
         "01 Low Trench - Hold, Neutral x2",
         "R26 01 Low Trench - Hold, Neutral x2", true);

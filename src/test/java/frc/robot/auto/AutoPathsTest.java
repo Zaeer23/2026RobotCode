@@ -34,7 +34,7 @@ public class AutoPathsTest {
 
   /** Must match the names registered in RobotContainer.registerAutoCommands(). */
   private static final Set<String> REGISTERED_COMMANDS =
-      Set.of("Shoot", "SpinUp", "IntakeDown", "StopAll", "AlignToHub", "FeedCorral");
+      Set.of("Shoot", "SpinUp", "IntakeDown", "StopAll", "AlignToHub", "FeedOutpost");
 
   /** 0.9 m square with bumpers, as in PathPlanner's settings. */
   private static final double ROBOT_HALF_WIDTH = 0.45;
@@ -275,9 +275,9 @@ public class AutoPathsTest {
   public void everyWaypointIsOnTheField() throws Exception {
     for (String auto : autos()) {
       for (String path : pathsOf(auto)) {
-        // Paths that park against the OUTPOST to feed the CORRAL arrive squared, so only the
+        // Paths that park against the OUTPOST to feed the OUTPOST arrive squared, so only the
         // half-width needs to clear the wall. Everything else allows for rotation.
-        double margin = path.contains("Corral") ? ROBOT_HALF_WIDTH : ROBOT_HALF_DIAGONAL;
+        double margin = path.contains("Outpost") ? ROBOT_HALF_WIDTH : ROBOT_HALF_DIAGONAL;
         for (Translation2d point : allPoints(path)) {
           assertTrue(
               point.getX() >= margin && point.getX() <= FIELD_LENGTH - margin,
@@ -400,10 +400,10 @@ public class AutoPathsTest {
           assertTrue(
               range >= MIN_SHOT_RANGE && range <= MAX_SHOT_RANGE,
               auto + " shoots from " + String.format("%.2f", range) + " m, outside the shot table");
-        } else if (step.equals("named:FeedCorral")) {
+        } else if (step.equals("named:FeedOutpost")) {
           assertTrue(
               at != null && at.getX() < 0.6 && Math.abs(at.getY() - 0.666) < 0.2,
-              auto + " feeds the CORRAL from " + at + ", not lined up with the OUTPOST opening");
+              auto + " feeds the OUTPOST from " + at + ", not lined up with the OUTPOST opening");
         }
       }
     }

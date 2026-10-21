@@ -335,8 +335,18 @@ public class DashboardApp {
 
     bindingEditor = new BindingEditor(controls);
 
-    driverDiagram.setOnSelect(input -> operatorDiagram.setBindings(
-        bindingEditor.bindingsForRole("OPERATOR")));
+    // Clicking a button on either pad points the editor at it and clears the selection on the
+    // other pad, so only one target is ever highlighted. This used to set the OPERATOR diagram's
+    // bindings from a DRIVER click and nothing else, which meant the drawing was not actually
+    // wired to the editor at all.
+    driverDiagram.setOnSelect(input -> {
+      operatorDiagram.setSelectedInput(null);
+      bindingEditor.selectTarget("DRIVER", input);
+    });
+    operatorDiagram.setOnSelect(input -> {
+      driverDiagram.setSelectedInput(null);
+      bindingEditor.selectTarget("OPERATOR", input);
+    });
 
     JPanel diagrams = new JPanel(new GridLayout(1, 2, Theme.GAP, 0));
     diagrams.setOpaque(false);

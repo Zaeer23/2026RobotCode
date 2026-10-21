@@ -25,7 +25,7 @@ public class AutoCatalogTest {
 
   /** Same values RobotContainer registers. */
   private static final double SHOT_SECONDS = 3.5;
-  private static final double FEED_SECONDS = 2.0;
+  private static final double FEED_SECONDS = 3.0;
 
   private static final double AUTO_SECONDS = 20.0;
 
@@ -43,7 +43,7 @@ public class AutoCatalogTest {
   private static AutoCatalog catalog() {
     AutoCatalog catalog = new AutoCatalog(name -> Commands.none());
     catalog.setStepSeconds("Shoot", SHOT_SECONDS);
-    catalog.setStepSeconds("FeedCorral", FEED_SECONDS);
+    catalog.setStepSeconds("FeedOutpost", FEED_SECONDS);
     return catalog;
   }
 
@@ -111,7 +111,7 @@ public class AutoCatalogTest {
         for (JsonNode name : step.path("names")) {
           if ("Shoot".equals(name.asText())) {
             lastShot = t;
-          } else if ("FeedCorral".equals(name.asText())) {
+          } else if ("FeedOutpost".equals(name.asText())) {
             lastFeed = t;
           }
         }
@@ -127,7 +127,7 @@ public class AutoCatalogTest {
       }
       if (lastFeed >= 0.0) {
         assertTrue(lastFeed <= LAST_FEED_STARTS_BY,
-            auto + String.format(" starts feeding the CORRAL at %.1f s, too late", lastFeed));
+            auto + String.format(" starts feeding the OUTPOST at %.1f s, too late", lastFeed));
       }
     }
   }
@@ -139,7 +139,7 @@ public class AutoCatalogTest {
     assertEquals(3, count(catalog.stepsOf("R26 09 Center - Preload, Depot, Chute"), "Shoot"));
     JsonNode feeding = catalog.stepsOf("R26 03 Low Trench - Hold, Chute, Neutral to HP");
     assertEquals(1, count(feeding, "Shoot"));
-    assertEquals(1, count(feeding, "FeedCorral"));
+    assertEquals(1, count(feeding, "FeedOutpost"));
   }
 
   @Test

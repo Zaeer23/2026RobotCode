@@ -25,7 +25,7 @@ final class OfflineAutos {
    */
   private static final double SHOOT_SECONDS = 3.5;
   private static final double ALIGN_SECONDS = 2.0;
-  private static final double FEED_CORRAL_SECONDS = 2.0;
+  private static final double FEED_OUTPOST_SECONDS = 2.0;
 
   /** Chooser labels drop the generated routines' "R26 " prefix; so do these, so they match. */
   private static final String GENERATED_PREFIX = "R26 ";
@@ -52,7 +52,7 @@ final class OfflineAutos {
       AutoPreviewBuilder builder = new AutoPreviewBuilder(System.err::println);
       builder.setStepSeconds("Shoot", SHOOT_SECONDS);
       builder.setStepSeconds("AlignToHub", ALIGN_SECONDS);
-      builder.setStepSeconds("FeedCorral", FEED_CORRAL_SECONDS);
+      builder.setStepSeconds("FeedOutpost", FEED_OUTPOST_SECONDS);
 
       List<ObjectNode> routines = new ArrayList<>();
       for (String file : files) {

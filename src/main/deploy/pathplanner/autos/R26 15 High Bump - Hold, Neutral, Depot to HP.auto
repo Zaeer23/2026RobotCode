@@ -57,13 +57,13 @@
         {
           "type": "path",
           "data": {
-            "pathName": "Depot Down to Corral"
+            "pathName": "Depot Down to Outpost"
           }
         },
         {
           "type": "named",
           "data": {
-            "name": "FeedCorral"
+            "name": "FeedOutpost"
           }
         },
         {

@@ -152,7 +152,9 @@ final class MusicLibrary {
   synchronized void rescan() {
     Map<String, File> found = new LinkedHashMap<>();
     File home = new File(System.getProperty("user.home"));
-    scan(new File("music"), MAX_DEPTH, found);
+    for (File musicFolder : projectMusicFolders()) {
+      scan(musicFolder, MAX_DEPTH, found);
+    }
     scan(new File(home, "Music"), MAX_DEPTH, found);
     scan(new File(home, "Downloads"), 0, found);
     for (File folder : folders) {
@@ -169,6 +171,51 @@ final class MusicLibrary {
     List<File> sorted = new ArrayList<>(found.values());
     sorted.sort(Comparator.comparing(file -> title(file).toLowerCase(Locale.ROOT)));
     songs = sorted;
+  }
+
+  /**
+   * Every place the project's own {@code music} folder might be, relative to where this is running.
+   *
+   * <p>This used to be a bare {@code new File("music")}, which resolves against the process working
+   * directory. That only matches the project root when the dashboard is launched from there, so the
+   * three bundled songs vanished whenever it was started any other way — from the Driver Station,
+   * from a shortcut, or from the staged bundle in build/dashboard. The tab looked broken when the
+   * only thing wrong was where the process happened to be standing.
+   *
+   * <p>So: look next to the working directory, and also walk up from wherever this jar actually
+   * lives. From {@code build/dashboard/dashboard.jar} the project root is two levels up.
+   */
+  private static List<File> projectMusicFolders() {
+    List<File> roots = new ArrayList<>();
+    roots.add(new File("music").getAbsoluteFile());
+
+    File here = jarDirectory();
+    for (int up = 0; here != null && up < 4; up++) {
+      roots.add(new File(here, "music"));
+      here = here.getParentFile();
+    }
+
+    List<File> existing = new ArrayList<>();
+    for (File root : roots) {
+      if (root.isDirectory()) {
+        existing.add(root);
+      }
+    }
+    return existing;
+  }
+
+  /** The folder holding this class's jar, or null when running from loose classes. */
+  private static File jarDirectory() {
+    try {
+      java.net.URL source =
+          MusicLibrary.class.getProtectionDomain().getCodeSource().getLocation();
+      File path = new File(source.toURI());
+      return path.isDirectory() ? path : path.getParentFile();
+    } catch (Exception ignored) {
+      // No code source, an opaque classloader, or a URI we cannot turn into a path. The working
+      // directory entry above still stands; this is only ever an extra place to look.
+      return null;
+    }
   }
 
   private static void scan(File root, int depth, Map<String, File> found) {

@@ -14,7 +14,7 @@ layout:
 
   ROBOT STARTING LINE far edge 4.028 m from the wall; BUMPS start at 4.062 m (G303: bumpers must
   overlap the line and not touch a BUMP). HUB centre (4.626, 4.035). TRENCH lanes centred on
-  y=0.834 and y=7.235. OUTPOST/CORRAL opening centred on tag 29, y=0.666. TOWER base x 0..1.148,
+  y=0.834 and y=7.235. OUTPOST/OUTPOST opening centred on tag 29, y=0.666. TOWER base x 0..1.148,
   y 3.25..4.24. DEPOT x 0..0.686, y ~5.40..6.47. Neutral FUEL starts at x 7.36.
 """
 
@@ -105,7 +105,7 @@ NZ = {
 
 CHUTE = [wp(1.75, 0.95, 180.0, 180), wp(0.66, 0.72, 180.0, 180)]
 DEPOT = [wp(1.20, 5.15, 180.0, 90), wp(1.20, 6.65, 180.0, 90)]
-CORRAL = wp(0.50, 0.666, 180.0, 180)
+OUTPOST = wp(0.50, 0.666, 180.0, 180)
 
 
 def pose_wp(pose, t=None):
@@ -276,52 +276,52 @@ def depot_to(dest_name, dest, via=None, came_from=None):
     return leg(f"Depot {direction} to {dest_name}", pts)
 
 
-def to_corral(origin_name, origin, via=None):
-    pts = [pose_wp(origin)] + (via or []) + [wp(1.30, 0.70, 180.0, 180), CORRAL]
-    return leg(f"{origin_name} to Corral", pts, False, [(len(pts) - 2, len(pts) - 1, WALL)])
+def to_outpost(origin_name, origin, via=None):
+    pts = [pose_wp(origin)] + (via or []) + [wp(1.30, 0.70, 180.0, 180), OUTPOST]
+    return leg(f"{origin_name} to Outpost", pts, False, [(len(pts) - 2, len(pts) - 1, WALL)])
 
 
-def corral_to(dest_name, dest, via=None):
-    pts = [wp(CORRAL[0], CORRAL[1], 180.0, 0)] + (via or []) + [pose_wp(dest)]
-    return leg(f"Corral to {dest_name}", pts)
+def outpost_to(dest_name, dest, via=None):
+    pts = [wp(OUTPOST[0], OUTPOST[1], 180.0, 0)] + (via or []) + [pose_wp(dest)]
+    return leg(f"Outpost to {dest_name}", pts)
 
 
-def corral_to_neutral(side, row):
-    origin = (CORRAL[0], CORRAL[1], 180.0)
+def outpost_to_neutral(side, row):
+    origin = (OUTPOST[0], OUTPOST[1], 180.0)
     pts = [wp(origin[0], origin[1], 180.0, 0), wp(2.20, LANE_L, 180.0, 0)] + lane_out(side) + NZ[row]
     pts[2] = (pts[2][0], pts[2][1], 180.0, pts[2][3])
     pts[3] = (pts[3][0], pts[3][1], 180.0, pts[3][3])
     n = len(pts)
-    return leg(f"Corral to Neutral {row}", pts, True, [(n - 2, n - 1, SWEEP)])
+    return leg(f"Outpost to Neutral {row}", pts, True, [(n - 2, n - 1, SWEEP)])
 
 
-def neutral_to_corral(side, row):
-    """Carry a load from the neutral zone straight to the CORRAL for the human player."""
+def neutral_to_outpost(side, row):
+    """Carry a load from the neutral zone straight to the OUTPOST for the human player."""
     end = NZ[row][-1]
     pts = ([wp(end[0], end[1], 0.0, None)] + lane_in(side)
-           + [wp(2.20, LANE_L, 180.0, 180), wp(1.30, 0.70, 180.0, 180), CORRAL])
+           + [wp(2.20, LANE_L, 180.0, 180), wp(1.30, 0.70, 180.0, 180), OUTPOST])
     pts[1] = (pts[1][0], pts[1][1], 0.0, pts[1][3])
     pts[2] = (pts[2][0], pts[2][1], 0.0, pts[2][3])
     n = len(pts)
-    return leg(f"Neutral {row} to Corral", pts, False, [(n - 2, n - 1, WALL)])
+    return leg(f"Neutral {row} to Outpost", pts, False, [(n - 2, n - 1, WALL)])
 
 
-def chute_to_corral():
+def chute_to_outpost():
     end = CHUTE[-1]
-    return leg("Chute to Corral", [wp(end[0], end[1], 180.0, -90), CORRAL],
+    return leg("Chute to Outpost", [wp(end[0], end[1], 180.0, -90), OUTPOST],
                False, [(0, 1, WALL)])
 
 
 SHOOT = ("named", "Shoot", False)
-FEED = ("named", "FeedCorral", False)
+FEED = ("named", "FeedOutpost", False)
 
 # ---- The 20 autos -------------------------------------------------------------------------------
 
 S, Q = START, SHOT
 # Detour that keeps clear of the TOWER (x < 1.15, y 3.25..4.24 on blue) between the two ends.
 AROUND_TOWER = [wp(2.15, 4.90, None, -90), wp(2.15, 2.60, None, -90)]
-CORRAL_POSE = (CORRAL[0], CORRAL[1], 180.0)
-DEPOT_TO_CORRAL = AROUND_TOWER + [wp(1.30, 0.70, 180.0, 180)]
+OUTPOST_POSE = (OUTPOST[0], OUTPOST[1], 180.0)
+DEPOT_TO_OUTPOST = AROUND_TOWER + [wp(1.30, 0.70, 180.0, 180)]
 
 SO = START_OUT
 
@@ -335,7 +335,7 @@ autos = {
         to_chute("L Shot", Q["L"]), chute_to("O Shot", Q["O"]), SHOOT],
     "R26 03 Low Trench - Hold, Chute, Neutral to HP": [
         to_chute("L Start", S["L"]), chute_to("O Shot", Q["O"]), SHOOT,
-        to_neutral("O Shot", Q["O"], "L", "LC"), neutral_to_corral("L", "LC"), FEED],
+        to_neutral("O Shot", Q["O"], "L", "LC"), neutral_to_outpost("L", "LC"), FEED],
     "R26 04 Low Trench - Hold, Chute, Neutral": [
         to_chute("L Start", S["L"]), chute_to("O Shot", Q["O"]), SHOOT,
         to_neutral("O Shot", Q["O"], "L", "LC"), from_neutral("L", "LC", "L Shot", Q["L"]), SHOOT],
@@ -352,7 +352,7 @@ autos = {
         to_neutral("O Shot", Q["O"], "L", "LC"), from_neutral("L", "LC", "L Shot", Q["L"]), SHOOT],
     "R26 08 Low Bump - Hold, Chute, Neutral to HP": [
         to_chute("BL Start", S["BL"]), chute_to("O Shot", Q["O"]), SHOOT,
-        to_neutral("O Shot", Q["O"], "L", "LC"), neutral_to_corral("L", "LC"), FEED],
+        to_neutral("O Shot", Q["O"], "L", "LC"), neutral_to_outpost("L", "LC"), FEED],
 
     # ---- CENTER start (in front of the HUB) ----
     "R26 09 Center - Preload, Depot, Chute": [
@@ -361,7 +361,7 @@ autos = {
         to_chute("D Shot", Q["D"], via=AROUND_TOWER), chute_to("O Shot", Q["O"]), SHOOT],
     "R26 10 Center - Hold, Chute, Neutral to HP": [
         to_chute("C Start", S["C"]), chute_to("O Shot", Q["O"]), SHOOT,
-        to_neutral("O Shot", Q["O"], "L", "LC"), neutral_to_corral("L", "LC"), FEED],
+        to_neutral("O Shot", Q["O"], "L", "LC"), neutral_to_outpost("L", "LC"), FEED],
     "R26 11 Center - Hold, Depot, Neutral": [
         to_depot("C Start", S["C"]), depot_to("D Shot", Q["D"], came_from=S["C"]), SHOOT,
         to_neutral("D Shot", Q["D"], "H", "HC"), from_neutral("H", "HC", "H Shot", Q["H"]), SHOOT],
@@ -379,7 +379,7 @@ autos = {
     "R26 15 High Bump - Hold, Neutral, Depot to HP": [
         to_neutral("BH Start Out", SO["BH"], "H", "HC"), from_neutral("H", "HC", "H Shot", Q["H"]), SHOOT,
         to_depot("H Shot", Q["H"]),
-        depot_to("Corral", CORRAL_POSE, via=DEPOT_TO_CORRAL, came_from=Q["H"]), FEED],
+        depot_to("Outpost", OUTPOST_POSE, via=DEPOT_TO_OUTPOST, came_from=Q["H"]), FEED],
     "R26 16 High Bump - Hold, Neutral, Depot": [
         to_neutral("BH Start Out", SO["BH"], "H", "HC"), from_neutral("H", "HC", "H Shot", Q["H"]), SHOOT,
         to_depot("H Shot", Q["H"]), depot_to("D Shot", Q["D"], came_from=Q["H"]), SHOOT],
@@ -397,7 +397,7 @@ autos = {
     "R26 20 High Trench - Hold, Neutral, Depot to HP": [
         to_neutral("H Start Out", SO["H"], "H", "HX"), from_neutral("H", "HX", "H Shot", Q["H"]), SHOOT,
         to_depot("H Shot", Q["H"]),
-        depot_to("Corral", CORRAL_POSE, via=DEPOT_TO_CORRAL, came_from=Q["H"]), FEED],
+        depot_to("Outpost", OUTPOST_POSE, via=DEPOT_TO_OUTPOST, came_from=Q["H"]), FEED],
 }
 
 

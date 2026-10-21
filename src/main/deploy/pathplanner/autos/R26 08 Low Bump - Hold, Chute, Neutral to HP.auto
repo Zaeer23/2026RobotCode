@@ -57,13 +57,13 @@
         {
           "type": "path",
           "data": {
-            "pathName": "Neutral LC to Corral"
+            "pathName": "Neutral LC to Outpost"
           }
         },
         {
           "type": "named",
           "data": {
-            "name": "FeedCorral"
+            "name": "FeedOutpost"
           }
         },
         {

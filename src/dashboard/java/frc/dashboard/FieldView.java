@@ -38,7 +38,7 @@ import javax.swing.JPanel;
  *
  * <p>The field itself is drawn to the 2026 manual (section 5): each half's barrier of TRENCH, BUMP,
  * HUB, BUMP, TRENCH that every path has to get through, the ROBOT STARTING LINES, and along each
- * ALLIANCE WALL the OUTPOST with its CORRAL opening, the TOWER and the DEPOT with its 24 FUEL. The
+ * ALLIANCE WALL the OUTPOST with its opening, the TOWER and the DEPOT with its 24 FUEL. The
  * neutral-zone FUEL is drawn where it is staged at the start of a match. Red is blue rotated 180
  * degrees about the field centre, which is how the real field is built.
  */
@@ -77,9 +77,9 @@ public class FieldView extends JPanel {
   private static final double TOWER_HALF_WIDTH = 0.495;
   private static final double UPRIGHT_HALF_SPACING = 0.410;
 
-  /** CORRAL opening at the base of the OUTPOST, 32.0 in wide, centred on tag 29. */
-  private static final double CORRAL_CENTRE_Y = 0.666;
-  private static final double CORRAL_HALF_WIDTH = 0.406;
+  /** OUTPOST opening at the base of the OUTPOST, 32.0 in wide, centred on tag 29. */
+  private static final double OUTPOST_OPENING_CENTRE_Y = 0.666;
+  private static final double OUTPOST_OPENING_HALF_WIDTH = 0.406;
 
   /** OUTPOST AREA, 71.0 in wide, from the guardrail along the ALLIANCE WALL. */
   private static final double OUTPOST_WIDTH = 1.80;
@@ -481,7 +481,7 @@ public class FieldView extends JPanel {
     label(g2, "HUB", px(hubX), py(hubY), Theme.alpha(Theme.TEXT, 150));
   }
 
-  /** What stands along each ALLIANCE WALL: the OUTPOST and CORRAL, the TOWER, and the DEPOT. */
+  /** What stands along each ALLIANCE WALL: the OUTPOST and its opening, the TOWER, and the DEPOT. */
   private void drawWall(Graphics2D g2, boolean red) {
     Color alliance = red ? Theme.ALLIANCE_RED : Theme.ALLIANCE_BLUE;
     g2.setStroke(new BasicStroke(1.4f));
@@ -524,15 +524,15 @@ public class FieldView extends JPanel {
     label(g2, "TOWER", tower.getCenterX() + sideSign(red) * 6, tower.getCenterY(),
         Theme.alpha(Theme.TEXT, 140));
 
-    // OUTPOST: where the HUMAN PLAYER works. Its CORRAL opening is where robots feed them FUEL.
+    // OUTPOST: where the HUMAN PLAYER works. Its OUTPOST opening is where robots feed them FUEL.
     Rectangle2D outpost = sideRect(red, 0, 0, 0.10, OUTPOST_WIDTH);
     g2.setColor(Theme.alpha(alliance, 120));
     g2.fill(outpost);
-    Rectangle2D corral = sideRect(red, 0, CORRAL_CENTRE_Y - CORRAL_HALF_WIDTH, 0.16,
-        CORRAL_CENTRE_Y + CORRAL_HALF_WIDTH);
+    Rectangle2D opening = sideRect(red, 0, OUTPOST_OPENING_CENTRE_Y - OUTPOST_OPENING_HALF_WIDTH, 0.16,
+        OUTPOST_OPENING_CENTRE_Y + OUTPOST_OPENING_HALF_WIDTH);
     g2.setColor(Theme.alpha(FUEL, 150));
-    g2.fill(corral);
-    label(g2, "OUTPOST", corral.getCenterX() + sideSign(red) * 34, corral.getCenterY(),
+    g2.fill(opening);
+    label(g2, "OUTPOST", opening.getCenterX() + sideSign(red) * 34, opening.getCenterY(),
         Theme.alpha(Theme.TEXT, 140));
   }
 
