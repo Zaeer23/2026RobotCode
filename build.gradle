@@ -122,16 +122,22 @@ sourceSets {
     dashboard {
         java {
             srcDir 'src/dashboard/java'
-            // One robot class is shared: the auto preview builder. With it the dashboard draws
-            // routines from this project's own deploy folder when no robot is connected, using
-            // exactly the code the robot uses. It depends only on libraries, never on robot code.
-            srcDir 'src/main/java'
-            include 'frc/dashboard/**'
-            include 'frc/robot/auto/AutoPreviewBuilder.java'
         }
         resources.srcDir 'src/dashboard/resources'
-        compileClasspath += sourceSets.main.compileClasspath
-        runtimeClasspath += sourceSets.main.runtimeClasspath
+
+        // One robot class is shared: the auto preview builder. With it the dashboard draws
+        // routines from this project's own deploy folder when no robot is connected, using
+        // exactly the code the robot uses. It depends only on libraries, never on robot code.
+        //
+        // It is taken from main's COMPILED OUTPUT rather than by listing src/main/java as a
+        // second source directory here. Gradle is happy to have one folder in two source sets
+        // with include filters, but Eclipse -- which is what the VS Code Java extension runs on
+        // -- requires every source folder to belong to exactly one classpath entry. Sharing the
+        // folder made the project model fail to import, so the editor could not resolve any type
+        // in frc.robot (RobotContainer was unresolvable from its own package) and showed a few
+        // hundred phantom errors, while gradle built the whole time without complaint.
+        compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+        runtimeClasspath += sourceSets.main.output + sourceSets.main.runtimeClasspath
     }
 }
 
@@ -174,6 +180,12 @@ task dashboardJar(type: Jar) {
     manifest { attributes 'Main-Class': 'frc.dashboard.DashboardApp' }
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     from sourceSets.dashboard.output
+    // The shared preview builder now lives in main's output rather than being recompiled into
+    // the dashboard source set, so pull just that class in. Taking all of main's output would
+    // drag the robot classes, and their HAL dependencies, into a jar meant to run on a laptop.
+    from(sourceSets.main.output) {
+        include 'frc/robot/auto/AutoPreviewBuilder*.class'
+    }
     from {
         sourceSets.dashboard.runtimeClasspath
             .filter { it.name.endsWith('.jar') }
