@@ -57,6 +57,11 @@ public class HopperSubsystem extends SubsystemBase {
     return hopper.set(HOPPER_SPEED).finallyDo(() -> smc.setDutyCycle(0)).withName("Hopper.Feed");
   }
 
+  /** Used by the coordinated shot command, which owns this subsystem while feeding. */
+  public void setFeedEnabled(boolean enabled) {
+    smc.setDutyCycle(enabled ? HOPPER_SPEED : 0.0);
+  }
+
   public Command backFeedCommand() {
     return hopper.set(-HOPPER_SPEED).finallyDo(() -> smc.setDutyCycle(0)).withName("Hopper.BackFeed");
   }

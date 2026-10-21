@@ -364,7 +364,7 @@ public class ShuffleboardManager {
         driver.add("Left stick", "Drive / strafe");
         driver.add("Right stick", "Rotate");
         driver.add("A", "Zero gyro");
-        driver.add("Y  (hold)", "Square up to tag (rotate only)");
+        driver.add("Left trigger (hold)", "LINE UP: rotate + drive to range");
         driver.add("Right bumper (hold)", "LINE UP: rotate + drive to range");
         driver.add("Left bumper (hold)", "Lock wheels (X pattern)");
         driver.add("Start (hold)", "Line up on TOWER to climb");
@@ -377,25 +377,21 @@ public class ShuffleboardManager {
                 .withSize(3, 6)
                 .withProperties(Map.of("Label position", "LEFT"));
 
-        // The three vision actions are deliberately on three different buttons.
-        shooting.add("Y  (hold)", "TRACK + SHOOT: aim, spin, fire. Chassis NOT moved");
-        shooting.add("Left bumper (hold)", "LINE UP + SHOOT: drives to range, then fires");
-        shooting.add("Right bumper (hold)", "AIM ONLY: track + spin, never feeds");
+        shooting.add("Turret", "Tracks automatically; right stick overrides");
+        shooting.add("Right bumper (hold)", "Spin at fixed RPM; never feeds");
         shooting.add("A  (hold)", "Feed hopper + kicker (manual fire)");
-        shooting.add("Right trigger", "Manual flywheel spin-up");
+        shooting.add("Right trigger (hold)", "Shoot: spin at fixed RPM, then feed when ready");
         shooting.add("X  (hold)", "Back-feed hopper");
         shooting.add("Right stick X", "Manual turret override");
 
         ShuffleboardLayout tuning = tab
-                .getLayout("OPERATOR  -  Shot tuning", BuiltInLayouts.kList)
+                .getLayout("OPERATOR  -  Turret trim", BuiltInLayouts.kList)
                 .withPosition(6, 0)
                 .withSize(3, 6)
                 .withProperties(Map.of("Label position", "LEFT"));
 
-        tuning.add("POV Left  (tap)", "Last shot was LONG  -  trim RPM down");
-        tuning.add("POV Right (tap)", "Last shot was SHORT -  trim RPM up");
-        tuning.add("POV Down  (tap)", "Shot SCORED - save it to the table");
-        tuning.add("Rumble", "Feedback window is open (10 s)");
+        tuning.add("BACK + Left bumper", "Aim trim +0.5 deg (left along shot)");
+        tuning.add("BACK + Right bumper", "Aim trim -0.5 deg (right along shot)");
         tuning.add("Intake", Constants.IntakeConstants.ENABLED
                 ? "B: intake   |   Left stick Y: pivot"
                 : "*** DISABLED *** (Constants.IntakeConstants.ENABLED)");

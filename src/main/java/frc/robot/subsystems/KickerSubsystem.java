@@ -58,6 +58,11 @@ public class KickerSubsystem extends SubsystemBase {
     return kicker.set(KICKER_SPEED).finallyDo(() -> smc.setDutyCycle(0)).withName("Kicker.Feed");
   }
 
+  /** Used by the coordinated shot command, which owns this subsystem while feeding. */
+  public void setFeedEnabled(boolean enabled) {
+    smc.setDutyCycle(enabled ? KICKER_SPEED : 0.0);
+  }
+
   /**
    * Command to stop the kicker.
    */

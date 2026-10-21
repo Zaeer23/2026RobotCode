@@ -313,9 +313,8 @@ public class AutoPathsTest {
   }
 
   @Test
-  public void everyPathEndsWithinShooterRange() throws Exception {
-    // The shot table only covers 1.0 to 5.0 m and deliberately refuses to extrapolate, so a path
-    // that parks the robot outside that band produces a shot of exactly zero RPM.
+  public void everyPathEndsWithinPlannedShootingRange() throws Exception {
+    // Preserve the 5 m range budget for these planned autonomous endpoints.
     Translation2d hub = blueHubCentre();
 
     for (String auto : AUTOS) {
@@ -330,7 +329,7 @@ public class AutoPathsTest {
         assertTrue(
             range < 5.0,
             path + " ends " + String.format("%.2f", range)
-                + " m from the hub, past the 5.0 m top of the shot table");
+                + " m from the hub, past the 5.0 m range budget for these paths");
       }
     }
   }

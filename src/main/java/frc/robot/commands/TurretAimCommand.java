@@ -8,7 +8,6 @@ import static edu.wpi.first.units.Units.Degrees;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj2.command.Command;
-import frc.robot.Constants.LimeLightConstants;
 import frc.robot.Constants.TurretConstants;
 import frc.robot.subsystems.TurretSubsystem;
 import frc.robot.vision.Limelight;
@@ -24,7 +23,7 @@ import frc.robot.vision.VisionTarget;
  * toward the last aim point through a dropout, which is literally "the turret moves on its own
  * with no tag detected". A turret that drifts by itself is worse than one that stops.
  *
- * <p><b>tx is not the turret angle.</b> The camera is bolted to the CHASSIS, 8.5 inches right of
+ * <p><b>tx is not the turret angle.</b> The camera is bolted to the CHASSIS, 8.5 inches beside
  * the turret pivot, and never moves. So tx is the angle from the LENS, and the turret pivot sees
  * the same tag at a different angle — about 6 degrees apart at 2 m, over 12 at 1 m. The tag is
  * resolved to a point in the robot frame and the angle is taken from the pivot to that point.
@@ -92,7 +91,7 @@ public class TurretAimCommand extends Command {
 
     VisionTarget tag = target.get();
     double currentDegrees = turret.getRawAngle().in(Degrees);
-    double solvedDegrees = solveTurretAngle(tag);
+    double solvedDegrees = solveTurretAngle(tag, turret.getAimTrimDegrees());
 
     // A different tag is a discontinuous aim point; re-seed instead of filtering across the jump.
     if (tag.id != lastTagId) {
@@ -123,7 +122,7 @@ public class TurretAimCommand extends Command {
       error = 0.0;
     }
     turret.setTrackingError(error);
-    turret.updateTrackingTelemetry(tag.id, error, 0.0);
+    turret.updateTrackingTelemetry(tag.id, error, turret.getLastTrackingOutput());
 
     frc.robot.util.RobotLog.put("Turret/AimState", "AIMING");
     frc.robot.util.RobotLog.put("Turret/AimTagId", tag.id);
@@ -173,7 +172,7 @@ public class TurretAimCommand extends Command {
    * two used to differ by the full parallax and flip-flopping between them made the solved angle
    * swing wildly.
    */
-  private double solveTurretAngle(VisionTarget tag) {
+  public static double solveTurretAngle(VisionTarget tag, double aimTrimDegrees) {
     double pivotX = TurretConstants.PIVOT_TO_ROBOT_CENTER.getX();
     double pivotY = TurretConstants.PIVOT_TO_ROBOT_CENTER.getY();
 
@@ -188,7 +187,8 @@ public class TurretAimCommand extends Command {
     return normalize(
         robotFrameDirection
             - TurretConstants.ZERO_ROBOT_DIRECTION_DEGREES
-            + TurretConstants.ENCODER_OFFSET_DEGREES);
+            + TurretConstants.ENCODER_OFFSET_DEGREES
+            + aimTrimDegrees);
   }
 
   /** Wraps an angle into (-180, 180]. */

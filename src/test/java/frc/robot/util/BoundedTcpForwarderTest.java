@@ -115,6 +115,95 @@ class BoundedTcpForwarderTest {
     }
   }
 
+  @Test
+  void cameraRoutesShareOneConnectionLimit() throws Exception {
+    var budget = new BoundedTcpForwarder.VideoBudget(1, 0);
+    try (ServerSocket camera = camera();
+        BoundedTcpForwarder firstRoute = new BoundedTcpForwarder(
+            0, "127.0.0.1", camera.getLocalPort(), budget);
+        BoundedTcpForwarder secondRoute = new BoundedTcpForwarder(
+            0, "127.0.0.1", camera.getLocalPort(), budget);
+        Socket firstViewer = viewer(firstRoute);
+        Socket upstream = camera.accept();
+        Socket excessViewer = viewer(secondRoute)) {
+      assertEquals(-1, excessViewer.getInputStream().read(),
+          "Another forwarding port must not bypass the shared viewer limit");
+    }
+  }
+
+  @Test
+  void stalledVideoReleasesSharedSlotWithoutPeerDisconnect() throws Exception {
+    var budget = new BoundedTcpForwarder.VideoBudget(1, 0);
+    try (ServerSocket camera = camera();
+        BoundedTcpForwarder firstRoute = new BoundedTcpForwarder(
+            0, "127.0.0.1", camera.getLocalPort(), budget);
+        BoundedTcpForwarder secondRoute = new BoundedTcpForwarder(
+            0, "127.0.0.1", camera.getLocalPort(), budget);
+        Socket stalledViewer = viewer(firstRoute);
+        Socket stalledUpstream = camera.accept()) {
+      // Neither endpoint closes voluntarily; an outage must not occupy a slot forever.
+      stalledViewer.setSoTimeout(7000);
+      assertEquals(-1, stalledViewer.getInputStream().read());
+      stalledUpstream.setSoTimeout(3000);
+      assertEquals(-1, stalledUpstream.getInputStream().read());
+      try (Socket nextViewer = viewer(secondRoute);
+          Socket nextUpstream = camera.accept()) {
+        nextUpstream.setSoTimeout(3000);
+        nextViewer.getOutputStream().write(9);
+        assertEquals(9, nextUpstream.getInputStream().read());
+      }
+    }
+  }
+
+  @Test
+  void failedCameraConnectionReleasesSharedSlot() throws Exception {
+    var budget = new BoundedTcpForwarder.VideoBudget(1, 0);
+    int unusedPort;
+    try (ServerSocket unused = camera()) {
+      unusedPort = unused.getLocalPort();
+    }
+    try (BoundedTcpForwarder failedRoute = new BoundedTcpForwarder(
+        0, "127.0.0.1", unusedPort, budget);
+        Socket viewer = viewer(failedRoute)) {
+      assertEquals(-1, viewer.getInputStream().read());
+    }
+    // Peer EOF can arrive just before the worker releases its permit.
+    Thread.sleep(50);
+    try (ServerSocket camera = camera();
+        BoundedTcpForwarder liveRoute = new BoundedTcpForwarder(
+            0, "127.0.0.1", camera.getLocalPort(), budget);
+        Socket viewer = viewer(liveRoute);
+        Socket upstream = camera.accept()) {
+      viewer.getOutputStream().write(7);
+      upstream.setSoTimeout(3000);
+      assertEquals(7, upstream.getInputStream().read());
+    }
+  }
+
+  @Test
+  void cameraRoutesShareOneVideoBandwidthLimit() throws Exception {
+    var budget = new BoundedTcpForwarder.VideoBudget(2, 128 * 1024);
+    byte[] payload = new byte[64 * 1024];
+    try (ServerSocket camera = camera();
+        BoundedTcpForwarder firstRoute = new BoundedTcpForwarder(
+            0, "127.0.0.1", camera.getLocalPort(), budget);
+        BoundedTcpForwarder secondRoute = new BoundedTcpForwarder(
+            0, "127.0.0.1", camera.getLocalPort(), budget);
+        Socket firstViewer = viewer(firstRoute);
+        Socket firstUpstream = camera.accept();
+        Socket secondViewer = viewer(secondRoute);
+        Socket secondUpstream = camera.accept()) {
+      long started = System.nanoTime();
+      firstUpstream.getOutputStream().write(payload);
+      secondUpstream.getOutputStream().write(payload);
+      assertArrayEquals(payload, firstViewer.getInputStream().readNBytes(payload.length));
+      assertArrayEquals(payload, secondViewer.getInputStream().readNBytes(payload.length));
+      double elapsed = (System.nanoTime() - started) / 1e9;
+      assertTrue(elapsed >= 0.80,
+          "128 KiB at 128 KiB/s must take about one second across both routes: " + elapsed);
+    }
+  }
+
   private static Socket viewer(BoundedTcpForwarder forwarder) throws IOException {
     Socket socket = new Socket();
     socket.setReceiveBufferSize(16 * 1024);

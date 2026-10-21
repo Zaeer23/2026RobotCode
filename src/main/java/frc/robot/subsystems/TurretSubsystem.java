@@ -21,7 +21,9 @@ import static edu.wpi.first.units.Units.Seconds;
 import static edu.wpi.first.units.Units.Volts;
 import edu.wpi.first.units.measure.Angle;
 import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.Preferences;
 import edu.wpi.first.wpilibj.Timer;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
@@ -41,7 +43,7 @@ import yams.motorcontrollers.local.SparkWrapper;
 
 public class TurretSubsystem extends SubsystemBase {
 
-  private static final double MAX_ONE_DIR_FOV = 90.0;
+  private static final double MAX_ONE_DIR_FOV = Constants.TurretConstants.MAX_ONE_DIR_FOV_DEGREES;
   private static final double SLOW_ZONE_DEGREES = 20.0;
   private static final double TRACK_HEALTH_MAX_TX_DEGREES = 3.0;
   private static final double TRACK_HEALTH_MAX_AGE_SECONDS = 0.20;
@@ -51,7 +53,11 @@ public class TurretSubsystem extends SubsystemBase {
   private double lastTrackDebugTimestampSeconds = -1.0;
   private double lastDriveReportSeconds = -1.0;
 
-  public final Translation3d turretTranslation = new Translation3d(-0.205, 0.0, 0.375);
+  private static final String AIM_TRIM_KEY = "Turret/AimTrimDegrees";
+  private static final double MAX_AIM_TRIM_DEGREES = 10.0;
+  private double aimTrimDegrees = 0.0;
+
+  public final Translation3d turretTranslation = Constants.TurretConstants.PIVOT_TO_ROBOT_CENTER;
 
   private final SparkMax spark = new SparkMax(Constants.TurretConstants.kMotorId, MotorType.kBrushless);
 
@@ -90,6 +96,32 @@ public class TurretSubsystem extends SubsystemBase {
   private double trackingErrorDegrees = Double.POSITIVE_INFINITY;
 
   public TurretSubsystem() {
+    Preferences.initDouble(AIM_TRIM_KEY, 0.0);
+    setAimTrimDegrees(Preferences.getDouble(AIM_TRIM_KEY, 0.0));
+    SmartDashboard.putString("Turret/AimTrimHelp",
+        "Positive = left/CCW viewed along the shot; negative = right/CW. Limit +/-10 deg.");
+    SmartDashboard.putData("Turret/ResetAimTrim", Commands.runOnce(() -> setAimTrimDegrees(0.0))
+        .ignoringDisable(true).withName("Turret.resetAimTrim"));
+  }
+
+  /** Saved fine adjustment; positive rotates the shot left (CCW viewed from above). */
+  public double getAimTrimDegrees() {
+    return aimTrimDegrees;
+  }
+
+  private void setAimTrimDegrees(double requestedDegrees) {
+    if (Double.isFinite(requestedDegrees)) {
+      aimTrimDegrees = Math.max(-MAX_AIM_TRIM_DEGREES,
+          Math.min(MAX_AIM_TRIM_DEGREES, requestedDegrees));
+    }
+    Preferences.setDouble(AIM_TRIM_KEY, aimTrimDegrees);
+    SmartDashboard.putNumber(AIM_TRIM_KEY, aimTrimDegrees);
+  }
+
+  /** Changes calibration without interrupting the active aiming/shooting command. */
+  public Command adjustAimTrimCommand(double deltaDegrees) {
+    return Commands.runOnce(() -> setAimTrimDegrees(aimTrimDegrees + deltaDegrees))
+        .ignoringDisable(true).withName("Turret.adjustAimTrim");
   }
 
   public Command setAngle(Angle angle) {
@@ -105,7 +137,8 @@ public class TurretSubsystem extends SubsystemBase {
   }
 
   public Angle getRobotAdjustedAngle() {
-    return turret.getAngle().plus(Degrees.of(180));
+    return turret.getAngle().plus(Degrees.of(Constants.TurretConstants.ZERO_ROBOT_DIRECTION_DEGREES
+        - Constants.TurretConstants.ENCODER_OFFSET_DEGREES));
   }
 
   public Angle getRawAngle() {
@@ -284,6 +317,7 @@ public class TurretSubsystem extends SubsystemBase {
   }
 
   public void clearTrackingTelemetry() {
+    trackingErrorDegrees = Double.POSITIVE_INFINITY;
     lastTrackingOutput = 0.0;
     filteredTrackingTxDegrees = 0.0;
     lastTrackingTagId = -1;
@@ -359,6 +393,10 @@ public class TurretSubsystem extends SubsystemBase {
 
   @Override
   public void periodic() {
+    double requestedTrim = SmartDashboard.getNumber(AIM_TRIM_KEY, aimTrimDegrees);
+    if (Double.compare(requestedTrim, aimTrimDegrees) != 0) {
+      setAimTrimDegrees(requestedTrim);
+    }
     turret.updateTelemetry();
     frc.robot.util.RobotLog.put("Turret/AngleDegrees", turret.getAngle().in(Degrees));
     frc.robot.util.RobotLog.put("Turret/AngleErrorDegrees", lastCommandedAngleDegrees - turret.getAngle().in(Degrees));

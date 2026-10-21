@@ -178,7 +178,7 @@ public class DashboardApp {
 
   /** The short list worth looking at mid-match. Deliberately not forty numbers. */
   private JPanel buildValuesPanel() {
-    JPanel grid = new JPanel(new GridLayout(2, 5, 8, 6));
+    JPanel grid = new JPanel(new GridLayout(2, 6, 8, 6));
     grid.setBackground(BG);
     grid.setBorder(BorderFactory.createEmptyBorder(8, 0, 0, 0));
 
@@ -193,6 +193,7 @@ public class DashboardApp {
     grid.add(valueTile("Tags seen", "Vision/VisibleTags"));
     grid.add(valueTile("Cmd RPM", "Shooter/CommandedRPM"));
     grid.add(valueTile("On target", "Turret/OnTarget"));
+    grid.add(valueTile("Aim trim", "Turret/AimTrimDegrees"));
     return grid;
   }
 

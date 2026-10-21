@@ -63,9 +63,11 @@ public final class VisionTarget {
   //
   // Robot frame: +X forward, +Y left, origin at robot centre.
 
-  /** Bearing from the LENS to the tag, CCW-positive degrees. */
+  /** Bearing from the lens to the tag projected onto the ground, in robot-frame radians. */
   private double lensBearingRadians() {
-    return Math.toRadians(-txDegrees + LimeLightConstants.MOUNT_YAW_DEGREES);
+    var ray = CameraGeometry.robotRelativeRay(txDegrees, tyDegrees,
+        LimeLightConstants.MOUNT_PITCH_DEGREES, LimeLightConstants.MOUNT_YAW_DEGREES);
+    return Math.atan2(ray.getY(), ray.getX());
   }
 
   /** Tag position forward of robot centre, meters. */
@@ -83,9 +85,8 @@ public final class VisionTarget {
   /**
    * Bearing from ROBOT CENTRE to the tag, CCW-positive degrees. Zero means dead ahead.
    *
-   * <p>Not the same as -tx. The lens sits 8.5 inches right of centre and never moves, so a tag
-   * centred in the camera is genuinely off to the robot's right -- by about 6 degrees at 2 m and
-   * over 12 at 1 m. Driving tx to zero would square the CAMERA up on the tag, not the robot.
+   * <p>The chassis-mounted lens is offset from the robot centerline, so a tag centered in the
+   * camera is offset from the robot centerline too. Mounting pitch also affects off-axis bearings.
    */
   public double bearingFromRobotCenterDegrees() {
     return Math.toDegrees(Math.atan2(robotFrameY(), robotFrameX()));

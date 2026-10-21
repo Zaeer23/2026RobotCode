@@ -268,7 +268,7 @@ public class Limelight extends SubsystemBase {
         continue;
       }
 
-      RangeResult range = solveRange(id, ty, raw[i + I_DIST_CAMERA]);
+      RangeResult range = solveRange(id, tx, ty, raw[i + I_DIST_CAMERA]);
       if (range == null) {
         continue;
       }
@@ -299,15 +299,12 @@ public class Limelight extends SubsystemBase {
    * fallback. Returns null when neither gives a believable answer, which drops the tag rather than
    * letting a bad range through.
    */
-  private RangeResult solveRange(int tagId, double tyDegrees, double distToCamera) {
+  private RangeResult solveRange(int tagId, double txDegrees, double tyDegrees, double distToCamera) {
     double deltaHeight = FieldTags.heightMeters(tagId) - LimeLightConstants.MOUNT_HEIGHT_METERS;
-    double angleDegrees = LimeLightConstants.MOUNT_PITCH_DEGREES + tyDegrees;
-
-    if (deltaHeight > 0.0 && angleDegrees > 1.0 && angleDegrees < 89.0) {
-      double range = deltaHeight / Math.tan(Math.toRadians(angleDegrees));
-      if (plausible(range)) {
-        return new RangeResult(range, "TY");
-      }
+    double range = CameraGeometry.groundRangeMeters(
+        txDegrees, tyDegrees, LimeLightConstants.MOUNT_PITCH_DEGREES, deltaHeight);
+    if (plausible(range)) {
+      return new RangeResult(range, "TY");
     }
 
     if (finite(distToCamera) && distToCamera > 0.0) {
@@ -552,12 +549,13 @@ public class Limelight extends SubsystemBase {
     double deltaHeight = tagHeight - assumedCameraHeight;
 
     // Pitch that would make the current height assumption produce the measured range.
-    double requiredPitch =
-        Math.toDegrees(Math.atan2(deltaHeight, knownRangeMeters)) - t.tyDegrees;
+    double requiredPitch = CameraGeometry.calibratedPitchDegrees(
+        t.txDegrees, t.tyDegrees, knownRangeMeters, deltaHeight);
 
     // Camera height that would make the current pitch assumption produce the measured range.
-    double requiredHeight =
-        tagHeight - (knownRangeMeters * Math.tan(Math.toRadians(assumedPitch + t.tyDegrees)));
+    var ray = CameraGeometry.robotRelativeRay(t.txDegrees, t.tyDegrees, assumedPitch, 0.0);
+    double requiredHeight = tagHeight
+        - knownRangeMeters * ray.getZ() / Math.hypot(ray.getX(), ray.getY());
 
     System.out.printf("  tag                  %s%n", FieldTags.describe(t.id));
     System.out.printf("  tag height           %.3f m (%.1f in, exact from field layout)%n",
@@ -633,6 +631,10 @@ public class Limelight extends SubsystemBase {
   // ---- Network discovery ----------------------------------------------------
 
   private static boolean forwardingStarted;
+  // Leave radio bandwidth available for Driver Station packets and telemetry. This is a
+  // payload budget (1.5 Mbit/s), shared across all three routes and both allowed viewers.
+  private static final BoundedTcpForwarder.VideoBudget VIDEO_BUDGET =
+      new BoundedTcpForwarder.VideoBudget(2, 187_500);
 
   /** Forwards camera video with backpressure, and web/configuration ports through WPILib. */
   public static synchronized void setupPortForwarding() {
@@ -683,7 +685,7 @@ public class Limelight extends SubsystemBase {
     try {
       // WPILib 2026.2.1's native forwarder queues writes without backpressure. A USB MJPEG
       // stream can exhaust roboRIO memory when the radio/viewer cannot keep up.
-      new BoundedTcpForwarder(localBase, host, 5800, 2);
+      new BoundedTcpForwarder(localBase, host, 5800, VIDEO_BUDGET);
     } catch (java.io.IOException e) {
       DriverStation.reportWarning("Could not forward Limelight video on " + localBase
           + ": " + e.getMessage(), false);

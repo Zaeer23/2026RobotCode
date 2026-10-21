@@ -156,8 +156,8 @@ public final class Constants
     public static final double MAX_ONE_DIR_FOV_DEGREES = 90.0;
 
     /**
-     * Encoder reading, in degrees, when the turret physically points straight out the front of the
-     * robot. Re-measure after any rebuild that disturbs the turret zero: vision tracking commands
+     * Encoder reading, in degrees, when the turret physically points in ZERO_ROBOT_DIRECTION_DEGREES
+     * (straight out the back). Re-measure after any rebuild that disturbs the turret zero: vision tracking commands
      * ABSOLUTE turret angles, so an error here becomes a constant aiming bias.
      */
     public static final double ENCODER_OFFSET_DEGREES = 0.0;
@@ -227,18 +227,9 @@ public final class Constants
       /**
        * Lens distance LEFT of robot centre, in the robot frame.
        *
-       * <p><b>Sign convention, stated unambiguously because this was wrong:</b> stand at the FRONT
-       * of the robot (the end WITHOUT the turret) and look toward the back. +Y, and therefore a
-       * positive value here, is to YOUR LEFT. Measuring from the back of the robot — the natural
-       * side to stand on, since that is where the turret and camera are — reverses left and right,
-       * and that is exactly how this ended up with the wrong sign.
-       *
-       * <p>The error it caused is a clean 2x: the solver placed the lens 8.5 in to one side while
-       * it was really 8.5 in to the other, so the computed aim point sat 17 in (1.4 ft) off the
-       * real tag, and the turret pointed there. A lateral miss of roughly double the mounting
-       * offset, independent of range, is the signature of this sign being backwards.
-       *
-       * <p>If the turret now misses by the same amount in the OPPOSITE direction, flip this back.
+       * <p>Robot left means left while looking forward from behind the robot. An observer standing
+       * at the front and looking toward the rear sees +Y on their RIGHT. Verify the physical lens
+       * position before changing this sign; a lateral mounting error changes parallax with range.
        */
       public static final double MOUNT_LEFT_METERS = Units.inchesToMeters(8.5);
 

@@ -166,6 +166,7 @@ public class DashboardTelemetry {
 
     // ---- Turret ----
     table.getEntry("Turret/AngleDegrees").setDouble(turret.getRawAngle().in(Degrees));
+    table.getEntry("Turret/AimTrimDegrees").setDouble(turret.getAimTrimDegrees());
     table.getEntry("Turret/OnTarget").setBoolean(turret.isOnTarget());
     table.getEntry("Turret/ErrorDegrees").setDouble(
         Double.isFinite(turret.getTrackingErrorDegrees())

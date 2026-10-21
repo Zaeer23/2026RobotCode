@@ -10,6 +10,7 @@ import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import frc.robot.vision.Limelight;
+import frc.robot.util.RobotHealth;
 import java.util.logging.Logger;
 import java.util.logging.Level;
 /**
@@ -26,6 +27,7 @@ public class Robot extends TimedRobot
   public RobotContainer m_robotContainer;
 
   private Timer disabledTimer;
+  private RobotHealth robotHealth;
 
   public Robot()
   {
@@ -67,6 +69,7 @@ public class Robot extends TimedRobot
   public void robotInit()
   {
     printBootGreeting();
+    robotHealth = new RobotHealth();
 
     Logger.getLogger("com.ctre").setLevel(Level.OFF);
     // Instantiate our RobotContainer.  This will perform all our button bindings, and put our
@@ -98,6 +101,7 @@ public class Robot extends TimedRobot
   @Override
   public void robotPeriodic()
   {
+    robotHealth.update();
     // Runs the Scheduler.  This is responsible for polling buttons, adding newly-scheduled
     // commands, running already-scheduled commands, removing finished or interrupted commands,
     // and running subsystem periodic() methods.  This must be called from the robot's periodic

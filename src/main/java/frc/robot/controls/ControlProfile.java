@@ -37,10 +37,7 @@ public class ControlProfile {
     SPIN_UP_ONLY,
     FEED,
     INTAKE,
-    HOPPER_BACKFEED,
-    TRIM_UP,
-    TRIM_DOWN,
-    CONFIRM_SHOT
+    HOPPER_BACKFEED
   }
 
   /** Physical inputs a profile can map an action onto. */
@@ -167,10 +164,7 @@ public class ControlProfile {
         .bind(Action.SHOOT, Role.OPERATOR, Input.RIGHT_TRIGGER)
         .bind(Action.FEED, Role.OPERATOR, Input.A)
         .bind(Action.INTAKE, Role.OPERATOR, Input.B)
-        .bind(Action.HOPPER_BACKFEED, Role.OPERATOR, Input.X)
-        .bind(Action.TRIM_DOWN, Role.OPERATOR, Input.POV_LEFT)
-        .bind(Action.TRIM_UP, Role.OPERATOR, Input.POV_RIGHT)
-        .bind(Action.CONFIRM_SHOT, Role.OPERATOR, Input.POV_DOWN);
+        .bind(Action.HOPPER_BACKFEED, Role.OPERATOR, Input.X);
   }
 
   /** Triggers do the feeding; bumpers nudge the turret. */

@@ -22,6 +22,7 @@ import frc.robot.Constants.ShooterConstants;
 import frc.robot.Constants.TurretConstants;
 import frc.robot.subsystems.swervedrive.SwerveSubsystem;
 import frc.robot.commands.DriveAlignCommand;
+import frc.robot.commands.FeedWhenReadyCommand;
 import frc.robot.commands.TurretAimCommand;
 import frc.robot.vision.Limelight;
 
@@ -294,7 +295,7 @@ public Command manualTurretControl(Supplier<Double> speedSupplier) {
    *
    * <p>Ranges off {@code getHubTarget()}, not {@code getTarget()}. The trench is plastered with
    * AprilTags and we shoot from right beside it, so the nearest tag is frequently a TRENCH tag.
-   * Ranging off that hands the shot table the distance to the tunnel we are standing next to, and
+   * Ranging off that hands the shot model the distance to the tunnel we are standing next to, and
    * the flywheel spins for a target metres closer than the hub actually is.
    */
   public double getHubDistanceMeters() {
@@ -332,48 +333,38 @@ public Command manualTurretControl(Supplier<Double> speedSupplier) {
   }
 
   /**
-   * Spins the flywheel for the currently measured hub range.
+   * One-button shot: spin at the fixed shooter speed and feed while it is ready.
    *
-   * <p>Aiming is the operator's job for now; this only sets the speed. The turret is not driven
-   * from vision until tag detection is trusted.
-   */
-  /**
-   * One-button shot: spin to the range-computed speed, then feed once it is genuinely ready.
-   *
-   * <p>The feed waits on {@code isAtShotSpeed} rather than firing immediately, because pushing a
-   * ball into a flywheel that has not reached speed is the single most reliable way to put it
-   * nowhere near the goal. The wait has a timeout so a mis-reported speed cannot lock the shot out
-   * entirely — after that it fires anyway and the driver can see the result.
+   * <p>Readiness must hold for 100 ms before feeding. Losing flywheel speed or intake
+   * clearance stops the rollers until readiness settles again. There is no timeout that bypasses
+   * the speed check. The intake stays raised throughout the shot.
    *
    * <p>Aiming is not part of this. The turret tracks on its own as a default command, so holding
    * this does not fight the driver for the chassis.
    */
   public Command shootWhenReadyCommand() {
-    Command spin = shooter.setSpeedForDistance(this::getHubDistanceMeters);
-
+    Command spin = shooter.spinUp();
     // The pivot must be clear of the ball's path BEFORE anything feeds. Raising it in parallel
     // with the spin-up costs no time, because the flywheel takes longer to reach speed than the
     // pivot takes to lift.
     Command raisePivot = Constants.IntakeConstants.ENABLED
-        ? intake.raiseForShotCommand().asProxy()
+        ? intake.raiseForShotCommand()
         : Commands.none();
 
-    Command fire = Commands.sequence(
-        Commands.waitUntil(() ->
-            shooter.isAtShotSpeed()
-                && (!Constants.IntakeConstants.ENABLED || intake.isClearOfShot()))
-            .withTimeout(2.0),
-        feedAllCommand());
+    Command fire = new FeedWhenReadyCommand(
+        () -> shooter.isAtShotSpeed()
+            && (!Constants.IntakeConstants.ENABLED || intake.isClearOfShot()),
+        feeding -> {
+          hopper.setFeedEnabled(feeding);
+          kicker.setFeedEnabled(feeding);
+          frc.robot.util.RobotLog.put("Shooter/Feeding", feeding);
+        },
+        hopper, kicker);
 
-    // Deadline on `fire`: spin-up and the raised pivot both persist for exactly as long as the
-    // shot needs them, then release.
-    return Commands.deadline(fire, spin, raisePivot)
+    // Keep ownership of the rollers and intake through speed recovery. Releasing the button or
+    // the autonomous shot timeout interrupts all three and stops feeding.
+    return Commands.parallel(spin, raisePivot, fire)
         .withName("Superstructure.shootWhenReady");
-  }
-
-  public Command shootAtMeasuredRangeCommand() {
-    return shooter.setSpeedForDistance(this::getHubDistanceMeters)
-        .withName("Superstructure.shootAtMeasuredRange");
   }
 
   public Command feedAllCommand() {

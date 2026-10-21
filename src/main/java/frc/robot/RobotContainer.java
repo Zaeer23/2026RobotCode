@@ -63,6 +63,9 @@ public class RobotContainer
    */
   private double manualTurretInput()
   {
+    if (shooterXbox.back().getAsBoolean()) {
+      return 0.0;
+    }
     if (isAltShooterProfile()) {
       boolean left = shooterXbox.leftBumper().getAsBoolean();
       boolean right = shooterXbox.rightBumper().getAsBoolean();
@@ -181,8 +184,6 @@ private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
 
   /** Seconds an auto shot is allowed to take. The feed rollers never stop on their own. */
   private static final double AUTO_SHOT_TIMEOUT_SECONDS = 3.5;
-  private static final double BLIND_SPINUP_SECONDS = 1.2;
-  private static final double BLIND_FEED_SECONDS = 1.5;
 
   /**
    * Commands the PathPlanner {@code .auto} files call by name.
@@ -194,7 +195,7 @@ private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
   private void registerAutoCommands()
   {
     NamedCommands.registerCommand("Shoot", autoShotCommand());
-    NamedCommands.registerCommand("SpinUp", m_superstructure.shootAtMeasuredRangeCommand());
+    NamedCommands.registerCommand("SpinUp", m_shooter.spinUp());
     NamedCommands.registerCommand("IntakeDown", m_superstructure.setIntakeDeployAndRoll());
     NamedCommands.registerCommand("StopAll", m_superstructure.stopAllCommand());
     NamedCommands.registerCommand(
@@ -202,23 +203,11 @@ private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
   }
 
   /**
-   * One shot in autonomous.
-   *
-   * <p>Ranges off the Limelight when a hub tag is in view, which is the whole point of aiming with
-   * vision. When no tag is visible it falls back to a fixed-speed timed shot instead of waiting:
-   * {@code getHubDistanceMeters()} returns -1 with no target, the shot table correctly refuses to
-   * guess an RPM for that, and the result would otherwise be an auto that drives the whole routine
-   * and scores nothing because the flywheel never spun.
-   *
-   * <p>The branch is chosen once, when the command starts, which is what we want here — the robot
-   * is already parked at its shooting pose by then.
+   * One fixed-RPM shot in autonomous, feeding only while the flywheel is at speed.
    */
   private Command autoShotCommand()
   {
-    Command shot = Commands.either(
-        m_superstructure.shootWhenReadyCommand(),
-        blindShotCommand(),
-        m_superstructure::seesHub)
+    Command shot = m_superstructure.shootWhenReadyCommand()
         .withTimeout(AUTO_SHOT_TIMEOUT_SECONDS);
 
     // X-lock the wheels for the whole shot, for two reasons. Between two paths nothing requires
@@ -227,19 +216,6 @@ private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
     // resists being shoved by another robot mid-shot, which does the same thing but worse.
     // The lock is the deadline's passenger, so it releases the moment the shot finishes.
     return Commands.deadline(shot, drivebase.holdStillCommand()).withName("Auto.Shot");
-  }
-
-  /** Spin up for a fixed time, then feed for a fixed time. No vision, no readiness check. */
-  private Command blindShotCommand()
-  {
-    return Commands.deadline(
-        Commands.sequence(
-            Commands.waitSeconds(BLIND_SPINUP_SECONDS),
-            Commands.deadline(
-                Commands.waitSeconds(BLIND_FEED_SECONDS),
-                m_superstructure.feedAllCommand())),
-        m_shooter.spinUp())
-        .withName("Auto.BlindShot");
   }
 
   private void configureAutoChooser()
@@ -276,31 +252,10 @@ private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
   {
     new Trigger(() -> isCurrentShooterProfile() && shooterXbox.a().getAsBoolean())
         .whileTrue(m_superstructure.feedAllCommand());
-    // Three deliberately separate vision actions, on three separate buttons:
-    //   driver RB     -> LINEUP ONLY   : moves the chassis, never shoots
-    //   operator Y    -> TRACK + SHOOT : shoots, never moves the chassis
-    //   operator LB   -> LINEUP + SHOOT: does both
-    // Keeping them apart means the driver can reposition without firing, and the operator can fire
-    // without the robot driving itself out from under them.
-
-    // Automatic aiming and lineup were removed with the old targeting stack and come back once tag
-    // detection is verified on the robot. Only the range-based flywheel speed survives, below.
-
-    // SPIN FOR RANGE — sets flywheel speed from the measured hub distance. The operator still aims
-    // the turret and still picks the moment to fire with the manual feed on A.
-    new Trigger(() -> isCurrentShooterProfile() && shooterXbox.rightBumper().getAsBoolean())
-        .whileTrue(m_superstructure.shootAtMeasuredRangeCommand());
-    new Trigger(() -> isCurrentShooterProfile() && !shooterXbox.back().getAsBoolean() && shooterXbox.povLeft().getAsBoolean())
-        .onTrue(m_shooter.decreaseLimelightPowerForLastShotCommand());
-    new Trigger(() -> isCurrentShooterProfile() && !shooterXbox.back().getAsBoolean() && shooterXbox.povRight().getAsBoolean())
-        .onTrue(m_shooter.increaseLimelightPowerForLastShotCommand());
-    new Trigger(() -> isCurrentShooterProfile() && !shooterXbox.back().getAsBoolean() && shooterXbox.povDown().getAsBoolean())
-        .onTrue(m_shooter.confirmMadeShotCommand());
-    new Trigger(m_shooter::isFeedbackWindowOpen)
-        .whileTrue(Commands.startEnd(
-            () -> shooterXbox.setRumble(1.0),
-            () -> shooterXbox.setRumble(0.0))
-            .ignoringDisable(true));
+    // Operator right bumper spins the existing fixed-RPM shooter without feeding.
+    new Trigger(() -> isCurrentShooterProfile() && !shooterXbox.back().getAsBoolean()
+        && shooterXbox.rightBumper().getAsBoolean())
+        .whileTrue(m_shooter.spinUp());
     
     // The turret tracks the hub by DEFAULT — no button to hold. The operator's stick interrupts it
     // the instant they touch it, and tracking resumes the moment they let go. Unlike the drivebase,
@@ -322,7 +277,7 @@ private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
     // shooter control genuinely stops the wheel instead of leaving the last setpoint applied.
     m_shooter.setDefaultCommand(m_shooter.idleCommand());
 
-    // R2 (operator) = SHOOT. Spins to the range-computed speed and feeds once at speed.
+    // R2 (operator) = SHOOT. Spins to the fixed speed and feeds while at speed.
     new Trigger(() -> isCurrentShooterProfile() && shooterXbox.rightTrigger().getAsBoolean())
         .whileTrue(m_superstructure.shootWhenReadyCommand());
 
@@ -452,6 +407,11 @@ private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
     // and when it is absent every driverXbox binding silently does nothing. Duplicating them here
     // means the diagnostics work from whichever controller is actually connected.
     Trigger operatorDiagnostic = shooterXbox.back();
+    // Positive trim turns left when looking along the shot. Each press saves half a degree.
+    operatorDiagnostic.and(shooterXbox.leftBumper())
+        .onTrue(m_turret.adjustAimTrimCommand(0.5));
+    operatorDiagnostic.and(shooterXbox.rightBumper())
+        .onTrue(m_turret.adjustAimTrimCommand(-0.5));
     operatorDiagnostic.and(shooterXbox.povUp())
         .whileTrue(m_turret.rawDutyCycleCommand(0.12));
     operatorDiagnostic.and(shooterXbox.povLeft())
