@@ -15,15 +15,18 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 /**
- * Checks the PathPlanner autos against the real field before they ever reach the robot.
+ * Checks the PathPlanner autos against the real field and the 2026 game manual before they ever
+ * reach the robot.
  *
  * <p>The failures these catch are all silent ones. A misspelled named command does not throw, so
  * the auto just skips that step and the robot drives a tidy path without ever shooting. A missing
  * path file takes the whole routine out. A waypoint sitting inside the hub reads fine as JSON and
- * wrecks the robot on the field. None of that is visible by eye.
+ * wrecks the robot on the field. A shot from the neutral zone is a MAJOR FOUL that nobody notices
+ * until the score sheet. None of that is visible by eye.
  *
- * <p>Field geometry here is derived from the official AprilTag layout rather than typed in, so it
- * cannot drift away from the real field.
+ * <p>Every {@code .auto} in the deploy folder is checked, so a new routine is covered the moment
+ * it is saved. Field geometry is from the manual and the official AprilTag layout rather than
+ * guessed, so it cannot drift away from the real field.
  */
 public class AutoPathsTest {
 
@@ -31,53 +34,57 @@ public class AutoPathsTest {
 
   /** Must match the names registered in RobotContainer.registerAutoCommands(). */
   private static final Set<String> REGISTERED_COMMANDS =
-      Set.of("Shoot", "SpinUp", "IntakeDown", "StopAll", "AlignToHub");
+      Set.of("Shoot", "SpinUp", "IntakeDown", "StopAll", "AlignToHub", "FeedCorral");
 
-  private static final String[] AUTOS = {
-    "Trench Bottom Cycle",
-    "Trench Top Cycle",
-    "Trench Bottom Safe",
-    "Trench Top Safe",
-    "Neutral Zone Denial"
-  };
-
-  /**
-   * Paths that deliberately run under the trench, hard against the field edge.
-   *
-   * <p>These are exempt from the general wall margin. The robot drives them axis-aligned, so the
-   * clearance that matters is its half-width, not the half-diagonal a rotating robot needs.
-   */
-  private static final Set<String> TRENCH_PATHS =
-      Set.of("Trench Bot Enter", "Trench Top Enter");
-
-  /** Half the robot's 0.9 m width, which is the real margin while it is square to the wall. */
+  /** 0.9 m square with bumpers, as in PathPlanner's settings. */
   private static final double ROBOT_HALF_WIDTH = 0.45;
 
-  // --- The barrier across the field, from the 2026 manual -------------------------------------
-  // A single line of structure spans the full width: trench, bump, HUB, bump, trench. The trench
-  // is 1.194 m deep and the HUB is a 47 in square, so the band is x in [4.03, 5.22]. The only
-  // ways through are under the two trenches or over the two bumps.
+  /** A rotated robot reaches this far from its centre. */
+  private static final double ROBOT_HALF_DIAGONAL = 0.64;
 
-  private static final double BARRIER_NEAR_X = 4.03;
-  private static final double BARRIER_FAR_X = 5.22;
-
-  /** Trench opening is 1.668 m wide, measured from the guardrail. */
-  private static final double TRENCH_WIDTH = 1.668;
+  // --- Field geometry, 2026 manual section 5 (BLUE side; red is the same rotated 180 degrees) ---
 
   private static final double FIELD_LENGTH = 16.541;
   private static final double FIELD_WIDTH = 8.069;
   private static final double CENTRELINE_X = FIELD_LENGTH / 2.0;
 
-  private static final double BOTTOM_TRENCH_LOW = 0.0;
-  private static final double BOTTOM_TRENCH_HIGH = TRENCH_WIDTH;
-  private static final double TOP_TRENCH_LOW = FIELD_WIDTH - TRENCH_WIDTH;
-  private static final double TOP_TRENCH_HIGH = FIELD_WIDTH;
+  /**
+   * The ALLIANCE ZONE is 158.6 in deep and includes the ROBOT STARTING LINE, a 2 in tape line at
+   * its far edge.
+   */
+  private static final double ALLIANCE_ZONE_DEPTH = 4.028;
+  private static final double STARTING_LINE_NEAR = ALLIANCE_ZONE_DEPTH - 0.051;
 
-  /** The robot is 0.9 m square, so its centre is never legally nearer than this to an obstacle. */
-  private static final double ROBOT_HALF_DIAGONAL = 0.64;
+  /**
+   * A single line of structure spans the field: trench, bump, HUB, bump, trench. The trench is
+   * 1.194 m deep and the HUB a 47 in square, so the band is x in [4.03, 5.22]. The only ways
+   * through are under the two trenches or over the two bumps.
+   */
+  private static final double BARRIER_NEAR_X = 4.03;
+  private static final double BARRIER_FAR_X = 5.22;
 
-  /** Hub structure reaches roughly this far out from the centre of the tag ring. */
-  private static final double HUB_RADIUS = 0.75;
+  /** BUMPS are 44.4 in deep, centred on the HUB, so they start a little behind the line. */
+  private static final double BUMP_NEAR_X = 4.062;
+
+  /** Trench opening is 1.668 m wide, measured from the guardrail. */
+  private static final double TRENCH_WIDTH = 1.668;
+  private static final double BOTTOM_LANE = TRENCH_WIDTH / 2.0;
+  private static final double TOP_LANE = FIELD_WIDTH - TRENCH_WIDTH / 2.0;
+
+  /** HUB is a 47 in square. */
+  private static final double HUB_HALF = 0.597;
+
+  /**
+   * TOWER BASE: 39.0 in wide, 45.18 in deep from the TOWER WALL, centred on the centred tower tag
+   * (31, y = 3.746).
+   */
+  private static final double TOWER_DEPTH = 1.148;
+  private static final double TOWER_LOW_Y = 3.746 - 0.495;
+  private static final double TOWER_HIGH_Y = 3.746 + 0.495;
+
+  /** Shot table covers 1.0 to 5.0 m; stay inside it with room to spare. */
+  private static final double MIN_SHOT_RANGE = 1.0;
+  private static final double MAX_SHOT_RANGE = 4.5;
 
   private static JsonNode read(File file) throws Exception {
     return new ObjectMapper().readTree(file);
@@ -89,6 +96,18 @@ public class AutoPathsTest {
 
   private static File pathFile(String name) {
     return new File(DEPLOY, "paths/" + name + ".path");
+  }
+
+  /** Every auto in the deploy folder. */
+  private static List<String> autos() {
+    File[] files = new File(DEPLOY, "autos").listFiles((dir, name) -> name.endsWith(".auto"));
+    assertTrue(files != null && files.length > 0, "no autos found");
+    List<String> names = new ArrayList<>();
+    for (File file : files) {
+      names.add(file.getName().substring(0, file.getName().length() - ".auto".length()));
+    }
+    names.sort(String::compareTo);
+    return names;
   }
 
   /** Collects every "named" and "path" reference anywhere in an auto's command tree. */
@@ -138,16 +157,52 @@ public class AutoPathsTest {
     return points;
   }
 
-  @Test
-  public void everyAutoExists() {
-    for (String auto : AUTOS) {
-      assertTrue(autoFile(auto).isFile(), "missing auto file: " + auto);
+  private static Translation2d anchor(JsonNode waypoint) {
+    return new Translation2d(
+        waypoint.path("anchor").path("x").asDouble(), waypoint.path("anchor").path("y").asDouble());
+  }
+
+  private static Translation2d endOf(String path) throws Exception {
+    JsonNode waypoints = read(pathFile(path)).path("waypoints");
+    return anchor(waypoints.get(waypoints.size() - 1));
+  }
+
+  /** Distance from a point to an axis-aligned box; zero inside it. */
+  private static double boxDistance(Translation2d p, double x0, double x1, double y0, double y1) {
+    double dx = Math.max(Math.max(x0 - p.getX(), 0.0), p.getX() - x1);
+    double dy = Math.max(Math.max(y0 - p.getY(), 0.0), p.getY() - y1);
+    return Math.hypot(dx, dy);
+  }
+
+  /**
+   * The top-level steps of an auto in order, each either "path:NAME" or "named:NAME". A path run
+   * alongside a named command (intake down while driving) counts as the path.
+   */
+  private static List<String> topLevelSteps(String auto) throws Exception {
+    List<String> steps = new ArrayList<>();
+    for (JsonNode command : read(autoFile(auto)).path("command").path("data").path("commands")) {
+      String type = command.path("type").asText("");
+      if ("named".equals(type)) {
+        steps.add("named:" + command.path("data").path("name").asText(""));
+      } else if ("path".equals(type)) {
+        steps.add("path:" + command.path("data").path("pathName").asText(""));
+      } else {
+        List<String> named = new ArrayList<>();
+        List<String> paths = new ArrayList<>();
+        collect(command.path("data").path("commands"), named, paths);
+        if (!paths.isEmpty()) {
+          steps.add("path:" + paths.get(0));
+        } else {
+          named.forEach(name -> steps.add("named:" + name));
+        }
+      }
     }
+    return steps;
   }
 
   @Test
   public void everyNamedCommandIsActuallyRegistered() throws Exception {
-    for (String auto : AUTOS) {
+    for (String auto : autos()) {
       List<String> named = new ArrayList<>();
       List<String> paths = new ArrayList<>();
       collect(read(autoFile(auto)).path("command"), named, paths);
@@ -164,7 +219,7 @@ public class AutoPathsTest {
 
   @Test
   public void everyReferencedPathFileExists() throws Exception {
-    for (String auto : AUTOS) {
+    for (String auto : autos()) {
       List<String> paths = pathsOf(auto);
       assertFalse(paths.isEmpty(), auto + " follows no path");
       for (String path : paths) {
@@ -177,7 +232,7 @@ public class AutoPathsTest {
   public void everyAutoResetsOdometry() throws Exception {
     // Without this the robot assumes it is wherever odometry was last left, and the first path
     // drives off from the wrong origin.
-    for (String auto : AUTOS) {
+    for (String auto : autos()) {
       assertTrue(
           read(autoFile(auto)).path("resetOdom").asBoolean(false),
           auto + " does not reset odometry, so its start pose is whatever was left over");
@@ -185,16 +240,50 @@ public class AutoPathsTest {
   }
 
   @Test
+  public void everyStartIsLegal() throws Exception {
+    // G303: BUMPERS overlap the ROBOT STARTING LINE, and the robot is not touching a BUMP. Starts
+    // are squared to the line, so the footprint is exactly the 0.9 m square.
+    for (String auto : autos()) {
+      String first = pathsOf(auto).get(0);
+      JsonNode path = read(pathFile(first));
+      Translation2d start = anchor(path.path("waypoints").get(0));
+      double heading = path.path("idealStartingState").path("rotation").asDouble();
+      double front = start.getX() + ROBOT_HALF_WIDTH;
+      double back = start.getX() - ROBOT_HALF_WIDTH;
+
+      assertTrue(
+          Math.abs(Math.sin(Math.toRadians(heading))) < 0.02,
+          auto + " starts at " + heading + " degrees; starts must be squared to the line");
+      assertTrue(
+          front > STARTING_LINE_NEAR && back < ALLIANCE_ZONE_DEPTH,
+          auto + " starts at x=" + start.getX() + ": its BUMPERS do not overlap the ROBOT "
+              + "STARTING LINE (G303)");
+
+      double low = start.getY() - ROBOT_HALF_WIDTH;
+      double high = start.getY() + ROBOT_HALF_WIDTH;
+      boolean inATrenchLane = high <= TRENCH_WIDTH || low >= FIELD_WIDTH - TRENCH_WIDTH;
+      if (!inATrenchLane) {
+        // In front of a BUMP or the HUB: the front bumper must stop short of both.
+        assertTrue(
+            front < BUMP_NEAR_X,
+            auto + " starts touching a BUMP or the HUB (front bumper at x=" + front + ")");
+      }
+    }
+  }
+
+  @Test
   public void everyWaypointIsOnTheField() throws Exception {
-    for (String auto : AUTOS) {
+    for (String auto : autos()) {
       for (String path : pathsOf(auto)) {
-        double margin = TRENCH_PATHS.contains(path) ? ROBOT_HALF_WIDTH : ROBOT_HALF_DIAGONAL;
+        // Paths that park against the OUTPOST to feed the CORRAL arrive squared, so only the
+        // half-width needs to clear the wall. Everything else allows for rotation.
+        double margin = path.contains("Corral") ? ROBOT_HALF_WIDTH : ROBOT_HALF_DIAGONAL;
         for (Translation2d point : allPoints(path)) {
           assertTrue(
-              point.getX() > margin && point.getX() < FIELD_LENGTH - margin,
+              point.getX() >= margin && point.getX() <= FIELD_LENGTH - margin,
               path + " point x=" + point.getX() + " puts the robot through a wall");
           assertTrue(
-              point.getY() > margin && point.getY() < FIELD_WIDTH - margin,
+              point.getY() >= margin && point.getY() <= FIELD_WIDTH - margin,
               path + " point y=" + point.getY() + " puts the robot through a wall");
         }
       }
@@ -203,15 +292,14 @@ public class AutoPathsTest {
 
   @Test
   public void nothingCrossesTheBarrierExceptThroughATrench() throws Exception {
-    // This is the test that matters most. A single line of structure spans the field -- trench,
-    // bump, hub, bump, trench -- and the only ways across are under a trench or over a bump.
-    // Going over the bump is a 15 degree ramp with a 6.5 in crest taken at speed, which is the
-    // high-failure crossing: it unsettles odometry and can beach or tip the robot. Every route
-    // here crosses under a trench instead, and this asserts it.
+    // This is the test that matters most. Going over the bump is a 15 degree ramp with a 6.5 in
+    // crest taken at speed, which is the high-failure crossing: it unsettles odometry and can
+    // beach or tip the robot. Every route here crosses under a trench instead, and this asserts
+    // it, pinned to the middle of the opening so the robot cannot clip the trench structure.
     //
     // Control points count. The anchors can sit either side of the barrier while the curve
     // between them cuts the corner straight across a bump.
-    for (String auto : AUTOS) {
+    for (String auto : autos()) {
       for (String path : pathsOf(auto)) {
         for (Translation2d point : allPoints(path)) {
           boolean overlapsBarrier =
@@ -220,66 +308,27 @@ public class AutoPathsTest {
           if (!overlapsBarrier) {
             continue;
           }
-
-          double low = point.getY() - ROBOT_HALF_WIDTH;
-          double high = point.getY() + ROBOT_HALF_WIDTH;
-          boolean inBottomTrench = low >= BOTTOM_TRENCH_LOW && high <= BOTTOM_TRENCH_HIGH;
-          boolean inTopTrench = low >= TOP_TRENCH_LOW && high <= TOP_TRENCH_HIGH;
-
+          double offLane = Math.min(
+              Math.abs(point.getY() - BOTTOM_LANE), Math.abs(point.getY() - TOP_LANE));
           assertTrue(
-              inBottomTrench || inTopTrench,
+              offLane < 0.20,
               path + " point (" + String.format("%.2f, %.2f", point.getX(), point.getY())
                   + ") is inside the barrier band x=[" + BARRIER_NEAR_X + ", " + BARRIER_FAR_X
-                  + "] but not inside a trench opening. That crosses a bump or the hub.");
+                  + "] but not on a trench centreline. That crosses a bump or the hub, or "
+                  + "clips the trench.");
         }
       }
     }
   }
 
   @Test
-  public void trenchLanesStayUnderTheTrench() throws Exception {
-    // The trench tags sit at y=0.644 and y=7.425. Running beside that line instead of on it is
-    // what clipped the trench structure, so these lanes are pinned to it within a tolerance, and
-    // still have to leave the robot's half-width clear of the field wall.
-    // The trench opening is 1.668 m wide measured from the guardrail, so its centre is at
-    // 0.834 (bottom) and FIELD_WIDTH - 0.834 (top). Centring the lane leaves a 0.9 m robot
-    // 0.384 m either side; drifting off centre spends that margin for nothing.
-    double tolerance = 0.20;
-    for (String path : TRENCH_PATHS) {
-      if (!pathFile(path).isFile()) {
-        continue;
-      }
-      boolean bottom = path.contains("Bot");
-      double laneCentre = bottom ? TRENCH_WIDTH / 2.0 : FIELD_WIDTH - TRENCH_WIDTH / 2.0;
-      for (Translation2d point : allPoints(path)) {
-        assertTrue(
-            Math.abs(point.getY() - laneCentre) < tolerance,
-            path + " point y=" + point.getY() + " is "
-                + String.format("%.2f", Math.abs(point.getY() - laneCentre))
-                + " m off the trench centreline at " + String.format("%.3f", laneCentre));
-        double wallGap = bottom ? point.getY() : FIELD_WIDTH - point.getY();
-        assertTrue(
-            wallGap > ROBOT_HALF_WIDTH,
-            path + " leaves only " + String.format("%.2f", wallGap)
-                + " m to the wall, less than the robot's half-width");
-      }
-    }
-  }
-
-  private static Translation2d anchor(JsonNode waypoint) {
-    return new Translation2d(
-        waypoint.path("anchor").path("x").asDouble(), waypoint.path("anchor").path("y").asDouble());
-  }
-
-  @Test
-  public void noAutoPutsTheRobotFullyAcrossTheCentreline() throws Exception {
-    // Deliberately crossing fully onto the opponent's side during auto is penalised under G211,
-    // up to a card for repeat or egregious cases. The denial auto in particular works the edge of
-    // the neutral zone on purpose, so this is the assertion that keeps it legal.
+  public void noAutoGetsToTheCentreline() throws Exception {
+    // G403 forbids getting completely across the CENTER LINE in AUTO. This is stricter: no part
+    // of the robot reaches it, so there is no contact with an opponent working their own half.
     //
     // Checking control points too is not pedantry: the anchors can sit behind the line while the
     // curve between them bulges across it.
-    for (String auto : AUTOS) {
+    for (String auto : autos()) {
       for (String path : pathsOf(auto)) {
         for (Translation2d point : allPoints(path)) {
           double robotEdge = point.getX() + ROBOT_HALF_DIAGONAL;
@@ -295,57 +344,89 @@ public class AutoPathsTest {
 
   @Test
   public void noWaypointDrivesIntoTheHub() throws Exception {
+    // Measured to the HUB's square footprint. Paths only come near it squared (the centre start
+    // and backing away from it), so the half-width is the clearance that matters.
     Translation2d hub = blueHubCentre();
-    double keepOut = HUB_RADIUS + ROBOT_HALF_DIAGONAL;
-
-    for (String auto : AUTOS) {
+    for (String auto : autos()) {
       for (String path : pathsOf(auto)) {
         for (Translation2d point : allPoints(path)) {
-          double distance = hub.getDistance(point);
+          double gap = boxDistance(point, hub.getX() - HUB_HALF, hub.getX() + HUB_HALF,
+              hub.getY() - HUB_HALF, hub.getY() + HUB_HALF);
           assertTrue(
-              distance > keepOut,
+              gap > ROBOT_HALF_WIDTH,
               path + " point (" + String.format("%.2f, %.2f", point.getX(), point.getY())
-                  + ") is " + String.format("%.2f", distance)
-                  + " m from the hub centre, inside the " + keepOut + " m keep-out");
+                  + ") puts the robot into the HUB");
         }
       }
     }
   }
 
   @Test
-  public void everyPathEndsWithinShooterRange() throws Exception {
-    // The shot table only covers 1.0 to 5.0 m and deliberately refuses to extrapolate, so a path
-    // that parks the robot outside that band produces a shot of exactly zero RPM.
-    Translation2d hub = blueHubCentre();
-
-    for (String auto : AUTOS) {
+  public void noWaypointDrivesIntoTheTower() throws Exception {
+    // The TOWER and its base plate stick 1.15 m out of the ALLIANCE WALL between the OUTPOST and
+    // the DEPOT, right where routes between the two would like to cut the corner.
+    for (String auto : autos()) {
       for (String path : pathsOf(auto)) {
-        JsonNode waypoints = read(pathFile(path)).path("waypoints");
-        JsonNode last = waypoints.get(waypoints.size() - 1);
-        Translation2d end =
-            new Translation2d(
-                last.path("anchor").path("x").asDouble(), last.path("anchor").path("y").asDouble());
-        // Range is measured to the hub face, which is about 0.6 m in from the centre.
-        double range = hub.getDistance(end) - 0.6;
-        assertTrue(
-            range < 5.0,
-            path + " ends " + String.format("%.2f", range)
-                + " m from the hub, past the 5.0 m top of the shot table");
+        for (Translation2d point : allPoints(path)) {
+          double gap = boxDistance(point, 0.0, TOWER_DEPTH, TOWER_LOW_Y, TOWER_HIGH_Y);
+          assertTrue(
+              gap > ROBOT_HALF_DIAGONAL,
+              path + " point (" + String.format("%.2f, %.2f", point.getX(), point.getY())
+                  + ") clips the TOWER");
+        }
       }
     }
   }
 
-  /** Mean of the eight blue hub tag positions from the official 2026 layout. */
+  @Test
+  public void everyShotIsFromInsideTheAllianceZoneAndInRange() throws Exception {
+    // G407: a robot may only launch into its HUB with its BUMPERS at least partly inside its
+    // ALLIANCE ZONE; doing otherwise is a MAJOR FOUL per shot. These require the whole robot
+    // inside, so drift during the shot cannot make it illegal. The range check keeps every shot
+    // inside the shot table, which refuses to extrapolate.
+    Translation2d hub = blueHubCentre();
+    for (String auto : autos()) {
+      Translation2d at = null;
+      for (String step : topLevelSteps(auto)) {
+        if (step.startsWith("path:")) {
+          at = endOf(step.substring("path:".length()));
+        } else if (step.equals("named:Shoot")) {
+          assertTrue(at != null, auto + " shoots before driving anywhere; start with a path");
+          assertTrue(
+              at.getX() + ROBOT_HALF_WIDTH <= ALLIANCE_ZONE_DEPTH,
+              auto + " shoots from x=" + String.format("%.2f", at.getX())
+                  + ", outside the ALLIANCE ZONE (G407, MAJOR FOUL)");
+          double range = hub.getDistance(at) - HUB_HALF;
+          assertTrue(
+              range >= MIN_SHOT_RANGE && range <= MAX_SHOT_RANGE,
+              auto + " shoots from " + String.format("%.2f", range) + " m, outside the shot table");
+        } else if (step.equals("named:FeedCorral")) {
+          assertTrue(
+              at != null && at.getX() < 0.6 && Math.abs(at.getY() - 0.666) < 0.2,
+              auto + " feeds the CORRAL from " + at + ", not lined up with the OUTPOST opening");
+        }
+      }
+    }
+  }
+
+  /**
+   * Centre of the blue HUB from the official 2026 layout: midway between opposite faces.
+   *
+   * <p>Not the mean of all eight HUB tags. Each face has one centred tag and one offset tag, and
+   * the offsets do not cancel, so the mean sits 9 cm toward the ALLIANCE WALL.
+   */
   private static Translation2d blueHubCentre() {
     AprilTagFieldLayout layout = AprilTagFieldLayout.loadField(AprilTagFields.k2026RebuiltWelded);
-    int[] blueHub = {18, 19, 20, 21, 24, 25, 26, 27};
-    double sumX = 0;
-    double sumY = 0;
-    for (int id : blueHub) {
-      var pose = layout.getTagPose(id).orElseThrow();
-      sumX += pose.getX();
-      sumY += pose.getY();
-    }
-    return new Translation2d(sumX / blueHub.length, sumY / blueHub.length);
+    double wallFace = layout.getTagPose(26).orElseThrow().getX();
+    double fieldFace = layout.getTagPose(20).orElseThrow().getX();
+    double lowFace = layout.getTagPose(18).orElseThrow().getY();
+    double highFace = layout.getTagPose(21).orElseThrow().getY();
+    return new Translation2d((wallFace + fieldFace) / 2.0, (lowFace + highFace) / 2.0);
+  }
+
+  @Test
+  public void thereAreTwentyRebuiltAutos() {
+    long count = autos().stream().filter(a -> a.startsWith("R26 ")).count();
+    assertTrue(count == 20, "expected 20 R26 autos, found " + count);
   }
 }

@@ -1,38 +1,40 @@
 package frc.dashboard;
 
 import java.awt.BorderLayout;
-import java.awt.Color;
+import java.awt.Component;
 import java.awt.Dimension;
+import java.awt.FlowLayout;
 import java.awt.Font;
+import java.awt.GraphicsEnvironment;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
 import java.awt.GridLayout;
-import java.io.File;
-import java.util.LinkedHashMap;
-import java.util.Map;
+import java.awt.Insets;
+import java.awt.Rectangle;
 
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
-import javax.swing.DefaultListModel;
 import javax.swing.JButton;
-import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
-import javax.swing.JFileChooser;
+import javax.swing.JComponent;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
-import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
-import javax.swing.JSlider;
 import javax.swing.JSplitPane;
 import javax.swing.JTabbedPane;
-import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
-import javax.swing.UIManager;
-import javax.swing.filechooser.FileNameExtensionFilter;
 
+import com.formdev.flatlaf.FlatClientProperties;
+
+import edu.wpi.first.apriltag.AprilTag;
+import edu.wpi.first.apriltag.AprilTagFieldLayout;
+import edu.wpi.first.apriltag.AprilTagFields;
 import edu.wpi.first.networktables.NetworkTable;
 import edu.wpi.first.networktables.NetworkTableInstance;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 
 /**
  * Driver station dashboard.
@@ -41,36 +43,44 @@ import edu.wpi.first.networktables.NetworkTableInstance;
  * it connects to the robot the same way Shuffleboard does, and works whether the robot is real or
  * in simulation.
  *
+ * <p>Four tabs: <b>Match</b> (field, camera, and the handful of numbers worth watching),
+ * <b>Autonomous</b> (pick the routine, with a picture of what it does), <b>Controls</b> (ports
+ * and live rebinding) and <b>Music</b> (searchable songs and playlists, see {@link MusicTab}).
+ * The header across the top is the same on every tab.
+ *
  * <p>Launch with {@code ./gradlew dashboard}, or build {@code ./gradlew dashboardJar} for
- * something double-clickable.
+ * something double-clickable. The first argument is the team number, or a host name such as
+ * {@code localhost} to connect to a simulated robot.
  */
 public class DashboardApp {
-
-  private static final Color BG = new Color(0x13, 0x15, 0x19);
-  private static final Color PANEL = new Color(0x1C, 0x1F, 0x26);
-  private static final Color EDGE = new Color(0x2C, 0x31, 0x3A);
-  private static final Color TEXT = new Color(0xD8, 0xDC, 0xE2);
-  private static final Color DIM = new Color(0x8A, 0x90, 0x98);
-  private static final Color GOOD = new Color(0x3D, 0xDC, 0x84);
-  private static final Color BAD = new Color(0xFF, 0x6B, 0x6B);
-  private static final Color ACCENT = new Color(0x4C, 0xC2, 0xFF);
-  private static final Color WARN = new Color(0xFF, 0xC4, 0x5C);
 
   /** Default team number; overridden by the first CLI argument. */
   private static final int DEFAULT_TEAM = 7064;
 
+  /** Must match {@code AutoCatalog.CHOOSER_KEY} on the robot. */
+  private static final String AUTO_CHOOSER = "Auto Routine";
+
   private final NetworkTableInstance nt = NetworkTableInstance.getDefault();
   private NetworkTable dash;
   private NetworkTable controls;
+  private NetworkTable autoChooser;
 
   private final MusicPlayer player = new MusicPlayer();
-  private final Map<String, JLabel> valueLabels = new LinkedHashMap<>();
 
+  private HeaderBar header;
+  private AutoTab autoTab;
+
+  // Match tab.
   private FieldView fieldView;
   private CameraView cameraView;
-  private JLabel connectionLabel;
-  private JLabel nowPlayingLabel;
-  private DefaultListModel<MusicPlayer.Track> playlistModel;
+  private Pill fixPill;
+  private ReadyTile readyTile;
+  private StatTile visionTile;
+  private StatTile rangeTile;
+  private StatTile shooterTile;
+  private StatTile turretTile;
+
+  // Controls tab.
   private JComboBox<Integer> driverPortBox;
   private JComboBox<Integer> operatorPortBox;
   private JLabel portsPresentLabel;
@@ -78,15 +88,20 @@ public class DashboardApp {
   private ControllerDiagram driverDiagram;
   private ControllerDiagram operatorDiagram;
   private BindingEditor bindingEditor;
+
+  private Pill nowPlayingChip;
+
   private boolean layoutLoaded = false;
 
   public static void main(String[] args) {
     int team = DEFAULT_TEAM;
+    String host = null;
     if (args.length > 0) {
       try {
-        team = Integer.parseInt(args[0]);
-      } catch (NumberFormatException ignored) {
-        // Fall through to the default; a bad argument should not stop the dashboard opening.
+        team = Integer.parseInt(args[0].trim());
+      } catch (NumberFormatException notATeam) {
+        // Not a number, so a server address: "localhost" for a simulated robot.
+        host = args[0].trim();
       }
     }
     // NetworkTables is a native library. The gradle `dashboard` task extracts the desktop DLLs
@@ -101,184 +116,218 @@ public class DashboardApp {
     }
 
     final int resolvedTeam = team;
-    SwingUtilities.invokeLater(() -> new DashboardApp().start(resolvedTeam));
+    final String resolvedHost = host;
+    SwingUtilities.invokeLater(() -> new DashboardApp().start(resolvedTeam, resolvedHost));
   }
 
-  private void start(int team) {
-    try {
-      UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
-    } catch (Exception ignored) {
-      // The default look and feel is fine.
-    }
+  private void start(int team, String host) {
+    Theme.install();
+
+    // The offline auto previews use PathPlanner, which posts its own alerts through SmartDashboard.
+    // Pointed at the robot's connection, those would appear on the robot's NetworkTables as if the
+    // robot had raised them. The dashboard uses nothing else of SmartDashboard, so it gets a
+    // private, unconnected instance.
+    SmartDashboard.setNetworkTableInstance(NetworkTableInstance.create());
 
     nt.startClient4("Dashboard");
-    nt.setServerTeam(team);
-    nt.startDSClient();
+    if (host != null) {
+      nt.setServer(host);
+    } else {
+      nt.setServerTeam(team);
+      nt.startDSClient();
+    }
     dash = nt.getTable("Dashboard");
     controls = nt.getTable("Controls");
+    autoChooser = nt.getTable("SmartDashboard").getSubTable(AUTO_CHOOSER);
 
-    JFrame frame = new JFrame("Team " + team + " Dashboard");
+    JFrame frame = new JFrame("Team " + team + "  ·  Driver Dashboard");
     frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-    frame.setMinimumSize(new Dimension(1100, 700));
-    frame.getContentPane().setBackground(BG);
+    frame.setIconImages(HeaderBar.Badge.windowIcons(team));
+    frame.setMinimumSize(new Dimension(1100, 680));
+    frame.getContentPane().setBackground(Theme.BG);
     frame.setLayout(new BorderLayout());
 
-    frame.add(buildHeader(), BorderLayout.NORTH);
+    header = new HeaderBar(team);
+    frame.add(header, BorderLayout.NORTH);
 
     JTabbedPane tabs = new JTabbedPane();
-    tabs.addTab("Match", buildMatchTab());
-    tabs.addTab("Controls", buildControlsTab());
-    tabs.addTab("Music", buildMusicTab());
+    tabs.addTab("Match", Icons.match(16, Theme.TEXT_DIM), buildMatchTab());
+    autoTab = new AutoTab(label -> autoChooser.getEntry("selected").setString(label));
+    tabs.addTab("Autonomous", Icons.route(16, Theme.TEXT_DIM), autoTab);
+    tabs.addTab("Controls", Icons.gamepad(16, Theme.TEXT_DIM), buildControlsTab());
+    tabs.addTab("Music", Icons.music(16, Theme.TEXT_DIM), new MusicTab(player));
+    tabs.putClientProperty(FlatClientProperties.TABBED_PANE_TRAILING_COMPONENT, buildTabTrailer());
     frame.add(tabs, BorderLayout.CENTER);
 
-    loadDefaultSongs();
-
     // One timer drives every refresh. Fast enough to feel live, slow enough to stay cheap.
-    new Timer(50, e -> refresh()).start();
+    loadOfflineField();
+    new Thread(() -> {
+      OfflineAutos.Result offline = OfflineAutos.load();
+      SwingUtilities.invokeLater(() -> autoTab.setOfflineCatalog(offline.catalogJson(),
+          offline.problem()));
+    }, "offline-autos").start();
 
+    new Timer(50, e -> refresh()).start();
+    refresh();
+
+    Rectangle screen = GraphicsEnvironment.getLocalGraphicsEnvironment().getMaximumWindowBounds();
+    frame.setSize(Math.min(1480, screen.width), Math.min(920, screen.height));
+    frame.setLocationRelativeTo(null);
     frame.setVisible(true);
   }
 
-  // ---- Header ---------------------------------------------------------------
-
-  private JPanel buildHeader() {
-    JPanel header = new JPanel(new BorderLayout());
-    header.setBackground(PANEL);
-    header.setBorder(BorderFactory.createEmptyBorder(8, 12, 8, 12));
-
-    connectionLabel = new JLabel("connecting...");
-    connectionLabel.setForeground(DIM);
-    connectionLabel.setFont(connectionLabel.getFont().deriveFont(Font.BOLD, 13f));
-    header.add(connectionLabel, BorderLayout.WEST);
-
-    nowPlayingLabel = new JLabel(" ");
-    nowPlayingLabel.setForeground(DIM);
-    header.add(nowPlayingLabel, BorderLayout.EAST);
-    return header;
+  /**
+   * The official field layout, so the field and the auto previews draw properly before a robot is
+   * connected. The robot publishes the same layout once it is, which replaces this.
+   */
+  private void loadOfflineField() {
+    try {
+      AprilTagFieldLayout layout = AprilTagFieldLayout.loadField(AprilTagFields.k2026RebuiltWelded);
+      double[] tags = new double[layout.getTags().size() * 5];
+      int i = 0;
+      for (AprilTag tag : layout.getTags()) {
+        tags[i++] = tag.ID;
+        tags[i++] = tag.pose.getX();
+        tags[i++] = tag.pose.getY();
+        tags[i++] = tag.pose.getZ();
+        tags[i++] = Math.toDegrees(tag.pose.getRotation().getZ());
+      }
+      fieldView.setFieldSize(layout.getFieldLength(), layout.getFieldWidth());
+      fieldView.setTagLayout(tags);
+      autoTab.setFieldLayout(layout.getFieldLength(), layout.getFieldWidth(), tags);
+    } catch (Exception e) {
+      // Without it the field still draws from its built-in dimensions, just without tags.
+    }
   }
 
-  // ---- Match tab ------------------------------------------------------------
+  /** Now-playing chip at the right end of the tab strip, so the music never needs its own tab. */
+  private JComponent buildTabTrailer() {
+    JPanel trailer = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 9));
+    trailer.setOpaque(false);
+    trailer.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 8));
+    nowPlayingChip = new Pill("", Theme.ROUTE_INTAKE);
+    nowPlayingChip.setVisible(false);
+    trailer.add(nowPlayingChip);
+    return trailer;
+  }
+
+  // ---- Match tab ----------------------------------------------------------------------------------
 
   private JPanel buildMatchTab() {
-    JPanel root = new JPanel(new BorderLayout(8, 8));
-    root.setBackground(BG);
-    root.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+    JPanel root = new JPanel(new BorderLayout(0, Theme.GAP));
+    root.setBackground(Theme.BG);
+    root.setBorder(BorderFactory.createEmptyBorder(16, 16, 16, 16));
 
     fieldView = new FieldView();
     cameraView = new CameraView();
 
-    JSplitPane views = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, fieldView, cameraView);
-    views.setResizeWeight(0.62);
-    views.setBorder(null);
+    fixPill = new Pill("NO FIX", Theme.TEXT_FAINT);
+    Card fieldCard = new Card("Field", "Position from AprilTags, no odometry");
+    fieldCard.setPadding(14, 16, 12, 16);
+    fieldCard.addHeaderRight(fixPill);
+    fieldCard.content(fieldView);
 
+    Card cameraCard = new Card("Limelight", "Forwarded through the robot");
+    cameraCard.setPadding(14, 16, 16, 16);
+    cameraCard.content(cameraView);
+
+    JSplitPane views = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, fieldCard, cameraCard);
+    views.setResizeWeight(0.64);
+    views.setBorder(null);
+    views.setOpaque(false);
+    views.setContinuousLayout(true);
     root.add(views, BorderLayout.CENTER);
-    root.add(buildValuesPanel(), BorderLayout.SOUTH);
+    root.add(buildTiles(), BorderLayout.SOUTH);
     return root;
   }
 
   /** The short list worth looking at mid-match. Deliberately not forty numbers. */
-  private JPanel buildValuesPanel() {
-    JPanel grid = new JPanel(new GridLayout(2, 5, 8, 6));
-    grid.setBackground(BG);
-    grid.setBorder(BorderFactory.createEmptyBorder(8, 0, 0, 0));
+  private JPanel buildTiles() {
+    readyTile = new ReadyTile();
+    visionTile = new StatTile("Vision");
+    rangeTile = new StatTile("Range to hub");
+    shooterTile = new StatTile("Shooter");
+    turretTile = new StatTile("Turret");
 
-    grid.add(valueTile("READY", "ReadyToShoot"));
-    grid.add(valueTile("Vision", "Vision/Status"));
-    grid.add(valueTile("Range ft", "Shooter/DistanceFeet"));
-    grid.add(valueTile("Shooter RPM", "Shooter/ActualRPM"));
-    grid.add(valueTile("Turret deg", "Turret/AngleDegrees"));
+    JPanel row = new JPanel(new GridBagLayout());
+    row.setOpaque(false);
+    GridBagConstraints c = new GridBagConstraints();
+    c.fill = GridBagConstraints.BOTH;
+    c.weighty = 1.0;
+    c.gridy = 0;
 
-    grid.add(valueTile("Match", "MatchTime"));
-    grid.add(valueTile("Battery", "BatteryVolts"));
-    grid.add(valueTile("Tags seen", "Vision/VisibleTags"));
-    grid.add(valueTile("Cmd RPM", "Shooter/CommandedRPM"));
-    grid.add(valueTile("On target", "Turret/OnTarget"));
-    return grid;
+    Component[] tiles = {readyTile, visionTile, rangeTile, shooterTile, turretTile};
+    double[] weights = {2.2, 1.3, 1.0, 1.2, 1.0};
+    for (int i = 0; i < tiles.length; i++) {
+      c.gridx = i;
+      c.weightx = weights[i];
+      c.insets = new Insets(0, i == 0 ? 0 : Theme.GAP, 0, 0);
+      row.add(tiles[i], c);
+    }
+    row.setPreferredSize(new Dimension(10, 110));
+    return row;
   }
 
-  private JPanel valueTile(String caption, String key) {
-    JPanel tile = new JPanel(new BorderLayout()) {
-      @Override
-      protected void paintComponent(java.awt.Graphics g) {
-        java.awt.Graphics2D g2 = (java.awt.Graphics2D) g.create();
-        g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING,
-            java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
-        g2.setColor(PANEL);
-        g2.fillRoundRect(0, 0, getWidth(), getHeight(), 10, 10);
-        g2.setColor(EDGE);
-        g2.drawRoundRect(0, 0, getWidth() - 1, getHeight() - 1, 10, 10);
-        g2.dispose();
-      }
-    };
-    tile.setOpaque(false);
-    tile.setBorder(BorderFactory.createEmptyBorder(7, 12, 7, 12));
+  // ---- Controls tab -------------------------------------------------------------------------------
 
-    JLabel captionLabel = new JLabel(caption.toUpperCase());
-    captionLabel.setForeground(DIM);
-    captionLabel.setFont(new Font("Segoe UI", Font.BOLD, 10));
-
-    JLabel value = new JLabel("-");
-    value.setForeground(TEXT);
-    value.setFont(new Font("Consolas", Font.BOLD, 19));
-
-    tile.add(captionLabel, BorderLayout.NORTH);
-    tile.add(value, BorderLayout.CENTER);
-    valueLabels.put(key, value);
-    return tile;
-  }
-
-  // ---- Controls tab ---------------------------------------------------------
-
-  private JPanel buildControlsTab() {
-    JPanel root = new JPanel();
-    root.setLayout(new BoxLayout(root, BoxLayout.Y_AXIS));
-    root.setBackground(BG);
+  private JComponent buildControlsTab() {
+    JPanel root = new TrackingPanel(new BorderLayout(Theme.GAP, 0));
+    root.setBackground(Theme.BG);
     root.setBorder(BorderFactory.createEmptyBorder(16, 16, 16, 16));
 
-    root.add(heading("Controller ports"));
-    root.add(note("Which USB port each role reads from. Change these to swap controllers "
-        + "without unplugging anything."));
-
+    // Ports.
     driverPortBox = portSelector();
     operatorPortBox = portSelector();
 
-    root.add(labelledRow("Driver", driverPortBox));
-    root.add(labelledRow("Operator", operatorPortBox));
-
-    JButton swap = new JButton("Swap driver and operator");
+    JButton swap = Ui.secondary("Swap driver and operator", Icons.swap(14, Theme.TEXT));
     swap.addActionListener(e -> {
       int driver = (int) driverPortBox.getSelectedItem();
       int operator = (int) operatorPortBox.getSelectedItem();
       controls.getEntry("DriverPort").setDouble(operator);
       controls.getEntry("OperatorPort").setDouble(driver);
     });
-    root.add(Box.createVerticalStrut(8));
-    root.add(swap);
+    portsPresentLabel = Ui.label("-", Theme.numeric(Font.PLAIN, 14f), Theme.TEXT);
 
-    portsPresentLabel = new JLabel("ports: -");
-    portsPresentLabel.setForeground(DIM);
-    root.add(Box.createVerticalStrut(12));
-    root.add(portsPresentLabel);
+    JPanel portsForm = form(
+        new Object[] {"Driver", driverPortBox},
+        new Object[] {"Operator", operatorPortBox},
+        new Object[] {"Plugged in", portsPresentLabel});
+    JPanel portsBody = new JPanel(new BorderLayout(0, 12));
+    portsBody.setOpaque(false);
+    portsBody.add(portsForm, BorderLayout.CENTER);
+    JPanel swapRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+    swapRow.setOpaque(false);
+    swapRow.add(swap);
+    portsBody.add(swapRow, BorderLayout.SOUTH);
 
-    root.add(Box.createVerticalStrut(24));
-    root.add(heading("Binding map"));
-    root.add(note("The active control set. Edit the profile name to switch sets; the robot "
-        + "reads it live."));
+    Card ports = new Card("Controller ports", "Which USB port each role reads from");
+    ports.content(portsBody);
 
+    // Profile.
     profileBox = new JComboBox<>();
-    profileBox.setMaximumSize(new Dimension(220, 28));
+    profileBox.setPreferredSize(new Dimension(200, 32));
     profileBox.addActionListener(e -> {
       if (profileBox.hasFocus() && profileBox.getSelectedItem() != null) {
         controls.getEntry("Profile").setString(profileBox.getSelectedItem().toString());
       }
     });
-    root.add(labelledRow("Profile", profileBox));
+    Card profile = new Card("Binding map", "The active control set, read live by the robot");
+    profile.content(form(new Object[] {"Profile", profileBox}));
 
-    root.add(Box.createVerticalStrut(16));
-    root.add(heading("Bindings"));
-    root.add(note("Click a button on a controller to select it. Pick an action, choose where it "
-        + "lives, and Apply -- the robot re-points that binding immediately, no redeploy."));
+    JPanel side = new JPanel();
+    side.setLayout(new BoxLayout(side, BoxLayout.Y_AXIS));
+    side.setOpaque(false);
+    ports.setAlignmentX(Component.LEFT_ALIGNMENT);
+    profile.setAlignmentX(Component.LEFT_ALIGNMENT);
+    ports.setMaximumSize(new Dimension(Integer.MAX_VALUE, ports.getPreferredSize().height));
+    profile.setMaximumSize(new Dimension(Integer.MAX_VALUE, profile.getPreferredSize().height));
+    side.add(ports);
+    side.add(Box.createVerticalStrut(Theme.GAP));
+    side.add(profile);
+    side.add(Box.createVerticalGlue());
+    side.setPreferredSize(new Dimension(340, 10));
 
+    // Bindings.
     driverDiagram = new ControllerDiagram();
     driverDiagram.setTitle("DRIVER");
     operatorDiagram = new ControllerDiagram();
@@ -289,24 +338,81 @@ public class DashboardApp {
     driverDiagram.setOnSelect(input -> operatorDiagram.setBindings(
         bindingEditor.bindingsForRole("OPERATOR")));
 
-    JPanel diagrams = new JPanel(new java.awt.GridLayout(1, 2, 8, 0));
-    diagrams.setBackground(BG);
-    diagrams.add(driverDiagram);
-    diagrams.add(operatorDiagram);
-    diagrams.setAlignmentX(JPanel.LEFT_ALIGNMENT);
-    root.add(diagrams);
+    JPanel diagrams = new JPanel(new GridLayout(1, 2, Theme.GAP, 0));
+    diagrams.setOpaque(false);
+    diagrams.add(diagramWell(driverDiagram));
+    diagrams.add(diagramWell(operatorDiagram));
 
-    root.add(Box.createVerticalStrut(10));
-    bindingEditor.setAlignmentX(JPanel.LEFT_ALIGNMENT);
-    root.add(bindingEditor);
+    JPanel bindingsBody = new JPanel(new BorderLayout(0, 16));
+    bindingsBody.setOpaque(false);
+    bindingsBody.add(diagrams, BorderLayout.CENTER);
+    bindingsBody.add(bindingEditor, BorderLayout.SOUTH);
 
-    root.add(Box.createVerticalGlue());
-    return root;
+    Card bindings = new Card("Bindings",
+        "Click a button on a controller to select it. Pick an action, choose where it lives, and "
+            + "Apply: the robot re-points that binding immediately, no redeploy.");
+    bindings.content(bindingsBody);
+
+    root.add(side, BorderLayout.WEST);
+    root.add(bindings, BorderLayout.CENTER);
+
+    JScrollPane scroll = new JScrollPane(root);
+    scroll.setBorder(null);
+    scroll.getVerticalScrollBar().setUnitIncrement(16);
+    scroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+    return scroll;
+  }
+
+  /** A recessed panel behind each controller drawing, so the pad sits on something. */
+  private static JComponent diagramWell(ControllerDiagram diagram) {
+    JPanel well = new JPanel(new BorderLayout()) {
+      @Override
+      protected void paintComponent(java.awt.Graphics g) {
+        java.awt.Graphics2D g2 = (java.awt.Graphics2D) g.create();
+        Theme.smooth(g2);
+        g2.setColor(Theme.SURFACE_RAISED);
+        g2.fill(new java.awt.geom.RoundRectangle2D.Double(0, 0, getWidth(), getHeight(), 12, 12));
+        g2.dispose();
+      }
+    };
+    well.setOpaque(false);
+    well.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+    well.add(diagram, BorderLayout.CENTER);
+    well.setPreferredSize(new Dimension(480, 250));
+    return well;
+  }
+
+  /** Label/field rows, labels aligned in one column. Each row is {caption, component}. */
+  private static JPanel form(Object[]... rows) {
+    JPanel form = new JPanel(new GridBagLayout());
+    form.setOpaque(false);
+    GridBagConstraints c = new GridBagConstraints();
+    c.gridy = 0;
+    c.anchor = GridBagConstraints.WEST;
+    for (Object[] row : rows) {
+      c.gridx = 0;
+      c.weightx = 0;
+      c.fill = GridBagConstraints.NONE;
+      c.insets = new Insets(0, 0, 8, 16);
+      form.add(Ui.label((String) row[0], Theme.ui(Font.PLAIN, 13f), Theme.TEXT_DIM), c);
+      c.gridx = 1;
+      c.weightx = 1;
+      c.insets = new Insets(0, 0, 8, 0);
+      JPanel holder = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+      holder.setOpaque(false);
+      holder.add((Component) row[1]);
+      form.add(holder, c);
+      c.gridy++;
+    }
+    JPanel top = new JPanel(new BorderLayout());
+    top.setOpaque(false);
+    top.add(form, BorderLayout.NORTH);
+    return top;
   }
 
   private JComboBox<Integer> portSelector() {
     JComboBox<Integer> box = new JComboBox<>(new Integer[] {0, 1, 2, 3, 4, 5});
-    box.setMaximumSize(new Dimension(80, 28));
+    box.setPreferredSize(new Dimension(120, 32));
     box.addActionListener(e -> {
       if (box.hasFocus()) {
         String key = box == driverPortBox ? "DriverPort" : "OperatorPort";
@@ -316,161 +422,170 @@ public class DashboardApp {
     return box;
   }
 
-  // ---- Music tab ------------------------------------------------------------
-
-  private JPanel buildMusicTab() {
-    JPanel root = new JPanel(new BorderLayout(12, 12));
-    root.setBackground(BG);
-    root.setBorder(BorderFactory.createEmptyBorder(16, 16, 16, 16));
-
-    playlistModel = new DefaultListModel<>();
-    JList<MusicPlayer.Track> list = new JList<>(playlistModel);
-    list.setBackground(PANEL);
-    list.setForeground(TEXT);
-    JScrollPane scroll = new JScrollPane(list);
-    scroll.setBorder(BorderFactory.createLineBorder(PANEL));
-    root.add(scroll, BorderLayout.CENTER);
-
-    JPanel controlsRow = new JPanel();
-    controlsRow.setLayout(new BoxLayout(controlsRow, BoxLayout.X_AXIS));
-    controlsRow.setBackground(BG);
-
-    JButton playPause = new JButton("Play");
-    playPause.addActionListener(e -> {
-      player.togglePause();
-      playPause.setText(player.isPlaying() ? "Pause" : "Play");
-    });
-
-    JButton next = new JButton("Next");
-    next.addActionListener(e -> player.next());
-
-    JButton stop = new JButton("Stop");
-    stop.addActionListener(e -> {
-      player.stop();
-      playPause.setText("Play");
-    });
-
-    JCheckBox shuffle = new JCheckBox("Shuffle", true);
-    shuffle.setBackground(BG);
-    shuffle.setForeground(TEXT);
-    shuffle.addActionListener(e -> player.setShuffle(shuffle.isSelected()));
-
-    JSlider volume = new JSlider(0, 100, (int) (player.getVolume() * 100));
-    volume.setBackground(BG);
-    volume.setMaximumSize(new Dimension(180, 28));
-    volume.addChangeListener(e -> player.setVolume(volume.getValue() / 100f));
-
-    JButton add = new JButton("Add songs...");
-    add.addActionListener(e -> chooseSongs());
-
-    JButton remove = new JButton("Remove");
-    remove.addActionListener(e -> {
-      int index = list.getSelectedIndex();
-      if (index >= 0) {
-        player.removeTrack(index);
-        refreshPlaylist();
-      }
-    });
-
-    controlsRow.add(playPause);
-    controlsRow.add(Box.createHorizontalStrut(6));
-    controlsRow.add(next);
-    controlsRow.add(Box.createHorizontalStrut(6));
-    controlsRow.add(stop);
-    controlsRow.add(Box.createHorizontalStrut(14));
-    controlsRow.add(shuffle);
-    controlsRow.add(Box.createHorizontalStrut(14));
-    controlsRow.add(new JLabel("Vol"));
-    controlsRow.add(volume);
-    controlsRow.add(Box.createHorizontalGlue());
-    controlsRow.add(add);
-    controlsRow.add(Box.createHorizontalStrut(6));
-    controlsRow.add(remove);
-
-    JPanel south = new JPanel(new BorderLayout(0, 8));
-    south.setBackground(BG);
-    south.add(new Visualizer(player), BorderLayout.NORTH);
-    south.add(controlsRow, BorderLayout.SOUTH);
-    root.add(south, BorderLayout.SOUTH);
-
-    player.setOnTrackChanged(track -> SwingUtilities.invokeLater(() ->
-        nowPlayingLabel.setText("♪  " + track.title)));
-    player.setOnError(message -> SwingUtilities.invokeLater(() ->
-        nowPlayingLabel.setText(message)));
-
-    return root;
-  }
-
-  private void chooseSongs() {
-    JFileChooser chooser = new JFileChooser();
-    chooser.setMultiSelectionEnabled(true);
-    chooser.setFileFilter(new FileNameExtensionFilter("MP3 audio", "mp3"));
-    if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) {
-      for (File file : chooser.getSelectedFiles()) {
-        player.addTrack(file);
-      }
-      refreshPlaylist();
-    }
-  }
-
-  /** Picks up any MP3s sitting next to the project or in Downloads, so it is not empty on day one. */
-  private void loadDefaultSongs() {
-    File[] candidates = {
-        new File("music"),
-        new File(System.getProperty("user.home"), "Downloads")
-    };
-    for (File dir : candidates) {
-      File[] found = dir.isDirectory()
-          ? dir.listFiles(f -> f.getName().toLowerCase().endsWith(".mp3"))
-          : null;
-      if (found != null) {
-        for (File file : found) {
-          player.addTrack(file);
-        }
-      }
-    }
-    refreshPlaylist();
-  }
-
-  private void refreshPlaylist() {
-    playlistModel.clear();
-    player.playlist().forEach(playlistModel::addElement);
-  }
-
-  // ---- Refresh --------------------------------------------------------------
+  // ---- Refresh ------------------------------------------------------------------------------------
 
   private void refresh() {
     boolean connected = nt.isConnected();
-    connectionLabel.setText(connected ? "ROBOT CONNECTED" : "robot not connected");
-    connectionLabel.setForeground(connected ? GOOD : BAD);
+    var connections = nt.getConnections();
+    String robotIp = connections.length > 0 ? connections[0].remote_ip : null;
 
-    for (Map.Entry<String, JLabel> entry : valueLabels.entrySet()) {
-      JLabel label = entry.getValue();
-      label.setText(readAsText(entry.getKey()));
-      label.setForeground(colourFor(entry.getKey()));
-    }
+    boolean enabled = dash.getEntry("Enabled").getBoolean(false);
+    String alliance = dash.getEntry("Alliance").getString("");
+    String activeAuto = autoChooser.getEntry("active").getString("");
+
+    header.update(
+        connected,
+        robotIp,
+        enabled,
+        dash.getEntry("Mode").getString(
+            dash.getEntry("Autonomous").getBoolean(false) ? "AUTO" : "TELEOP"),
+        alliance,
+        dash.getEntry("FMSAttached").getBoolean(false),
+        activeAuto,
+        dash.getEntry("MatchTime").getDouble(-1),
+        dash.getEntry("BatteryVolts").getDouble(0),
+        dash.getEntry("Brownout").getBoolean(false));
 
     if (!layoutLoaded) {
       double[] tags = dash.getEntry("Field/Tags").getDoubleArray(new double[0]);
       if (tags.length > 0) {
-        fieldView.setFieldSize(
-            dash.getEntry("Field/LengthMeters").getDouble(16.541),
-            dash.getEntry("Field/WidthMeters").getDouble(8.069));
+        double length = dash.getEntry("Field/LengthMeters").getDouble(16.541);
+        double width = dash.getEntry("Field/WidthMeters").getDouble(8.069);
+        fieldView.setFieldSize(length, width);
         fieldView.setTagLayout(tags);
+        autoTab.setFieldLayout(length, width, tags);
         layoutLoaded = true;
       }
     }
 
+    autoTab.update(
+        connected,
+        dash.getEntry("Auto/Catalog").getString(""),
+        autoChooser.getEntry("options").getStringArray(new String[0]),
+        activeAuto,
+        connected ? alliance : "");
+
+    refreshMatchTab(connected, enabled, alliance);
+    refreshControlsTab();
+
+    MusicPlayer.Track playing = player.currentTrack();
+    boolean musicOn = player.isPlaying() && playing != null;
+    if (musicOn) {
+      nowPlayingChip.set(StatTile.ellipsize(nowPlayingChip.getFontMetrics(nowPlayingChip.getFont()),
+          playing.title.toUpperCase(), 240), Theme.ROUTE_INTAKE);
+    }
+    if (nowPlayingChip.isVisible() != musicOn) {
+      nowPlayingChip.setVisible(musicOn);
+      nowPlayingChip.getParent().revalidate();
+    }
+  }
+
+  private void refreshMatchTab(boolean connected, boolean enabled, String alliance) {
+    boolean poseValid = dash.getEntry("Vision/PoseValid").getBoolean(false);
     fieldView.setVisibleTags(dash.getEntry("Vision/VisibleTagIds").getDoubleArray(new double[0]));
     fieldView.setRobotPose(
-        dash.getEntry("Vision/PoseValid").getBoolean(false),
+        poseValid,
         dash.getEntry("Vision/EstimatedX").getDouble(0),
         dash.getEntry("Vision/EstimatedY").getDouble(0),
         dash.getEntry("Vision/EstimatedHeadingDegrees").getDouble(0));
+
+    // Before the match, the auto that is about to run is drawn faintly behind the live view as
+    // a last check that it is the right one, on the right side.
+    AutoRoutine upcoming = connected && !enabled ? autoTab.activeRoutine() : null;
+    fieldView.setRoutine(upcoming, "red".equalsIgnoreCase(alliance), true);
     fieldView.repaint();
+
+    fixPill.set(connected && poseValid ? "TAG FIX" : "NO FIX",
+        connected && poseValid ? Theme.GOOD : Theme.TEXT_FAINT);
 
     cameraView.setCandidates(buildCameraCandidates());
 
+    readyTile.update(connected,
+        dash.getEntry("ReadyToShoot").getBoolean(false),
+        dash.getEntry("Vision/HasTarget").getBoolean(false),
+        dash.getEntry("Turret/OnTarget").getBoolean(false),
+        dash.getEntry("Shooter/AtSpeed").getBoolean(false));
+
+    if (!connected) {
+      for (StatTile tile : new StatTile[] {visionTile, rangeTile, shooterTile, turretTile}) {
+        tile.update("-", "", "No robot", Theme.TEXT_FAINT, null, Double.NaN);
+      }
+      return;
+    }
+
+    refreshVisionTile();
+
+    double feet = dash.getEntry("Shooter/DistanceFeet").getDouble(0);
+    rangeTile.update(
+        feet > 0 ? String.format("%.1f", feet) : "--",
+        "ft",
+        feet > 0 ? String.format("%.2f m to the hub", feet / 3.28084) : "No hub tag in view",
+        feet > 0 ? Theme.TEXT : Theme.TEXT_FAINT,
+        null,
+        Double.NaN);
+
+    double actual = dash.getEntry("Shooter/ActualRPM").getDouble(0);
+    double commanded = dash.getEntry("Shooter/CommandedRPM").getDouble(0);
+    boolean atSpeed = dash.getEntry("Shooter/AtSpeed").getBoolean(false);
+    shooterTile.update(
+        String.format("%.0f", actual),
+        "rpm",
+        commanded > 0 ? String.format("Target %.0f rpm", commanded) : "Idle",
+        atSpeed ? Theme.GOOD : Theme.TEXT,
+        atSpeed ? Theme.GOOD : (commanded > 0 ? Theme.WARN : null),
+        commanded > 0 ? actual / commanded : Double.NaN);
+
+    boolean onTarget = dash.getEntry("Turret/OnTarget").getBoolean(false);
+    double error = dash.getEntry("Turret/ErrorDegrees").getDouble(0);
+    turretTile.update(
+        String.format("%.1f", dash.getEntry("Turret/AngleDegrees").getDouble(0)),
+        "°",
+        onTarget ? "On target" : String.format("%.1f° off target", Math.abs(error)),
+        onTarget ? Theme.GOOD : Theme.TEXT,
+        onTarget ? Theme.GOOD : Theme.WARN,
+        Double.NaN);
+  }
+
+  /**
+   * The camera's own status, shortened to a word with the rest underneath.
+   *
+   * <p>The robot reports things like "LOCKED ON 20 (BLUE HUB)" or "SEES 2 TAG(S), NONE ELIGIBLE".
+   * The headline is what to react to; the detail is for when it is not what you expected.
+   */
+  private void refreshVisionTile() {
+    String status = dash.getEntry("Vision/Status").getString("");
+    String visible = dash.getEntry("Vision/VisibleTags").getString("");
+    String headline;
+    String detail;
+    java.awt.Color colour;
+    if (status.startsWith("LOCKED")) {
+      headline = "LOCKED";
+      detail = status.replaceFirst("^LOCKED ON\\s*", "");
+      colour = Theme.GOOD;
+    } else if (status.contains("DISCONNECT")) {
+      headline = "OFFLINE";
+      detail = "Camera not connected";
+      colour = Theme.BAD;
+    } else if (status.contains("NO TAGS")) {
+      headline = "SEARCHING";
+      detail = "Connected, no tags in view";
+      colour = Theme.WARN;
+    } else if (status.contains("NONE ELIGIBLE")) {
+      headline = "FILTERED";
+      detail = status;
+      colour = Theme.WARN;
+    } else {
+      headline = status.isEmpty() ? "-" : status;
+      detail = "";
+      colour = Theme.TEXT_DIM;
+    }
+    if (!visible.isEmpty() && !"none".equals(visible) && !visible.startsWith("camera")) {
+      detail = "Sees " + visible;
+    }
+    visionTile.update(headline, "", detail, colour, colour, Double.NaN);
+  }
+
+  private void refreshControlsTab() {
     // Only follow the robot's port values when the user is not editing the boxes.
     if (!driverPortBox.hasFocus()) {
       driverPortBox.setSelectedItem((int) controls.getEntry("DriverPort").getDouble(0));
@@ -478,7 +593,8 @@ public class DashboardApp {
     if (!operatorPortBox.hasFocus()) {
       operatorPortBox.setSelectedItem((int) controls.getEntry("OperatorPort").getDouble(1));
     }
-    portsPresentLabel.setText("ports: " + controls.getEntry("PortsPresent").getString("-"));
+    String present = controls.getEntry("PortsPresent").getString("");
+    portsPresentLabel.setText(present.isBlank() ? "-" : present);
 
     String[] options = controls.getEntry("ProfileOptions").getStringArray(new String[0]);
     if (options.length != profileBox.getItemCount()) {
@@ -534,97 +650,4 @@ public class DashboardApp {
     urls.add("http://limelight.local:5800/stream.mjpg");
     return urls;
   }
-
-  /**
-   * Colour for a value, so the tiles that matter read without being parsed.
-   *
-   * <p>Only the few things worth reacting to mid-match get colour; everything else stays neutral.
-   * A dashboard where every number is coloured is a dashboard where none of them stand out.
-   */
-  private Color colourFor(String key) {
-    switch (key) {
-      case "ReadyToShoot":
-        return dash.getEntry(key).getBoolean(false) ? GOOD : DIM;
-
-      case "Turret/OnTarget":
-        return dash.getEntry(key).getBoolean(false) ? GOOD : WARN;
-
-      case "Vision/Status": {
-        String status = dash.getEntry(key).getString("");
-        if (status.startsWith("LOCKED")) {
-          return GOOD;
-        }
-        return status.contains("DISCONNECT") ? BAD : WARN;
-      }
-
-      case "BatteryVolts": {
-        double volts = dash.getEntry(key).getDouble(0);
-        if (volts <= 0) {
-          return DIM;
-        }
-        // Below 11 V under load the roboRIO is heading for a brownout.
-        return volts < 11.0 ? BAD : (volts < 12.0 ? WARN : GOOD);
-      }
-
-      case "MatchTime": {
-        double seconds = dash.getEntry(key).getDouble(-1);
-        if (seconds < 0) {
-          return DIM;
-        }
-        return seconds <= 20.0 ? WARN : TEXT;
-      }
-
-      default:
-        return TEXT;
-    }
-  }
-
-  /** Reads a key without needing to know its type. */
-  private String readAsText(String key) {
-    var entry = dash.getEntry(key);
-    switch (entry.getType()) {
-      case kBoolean:
-        return entry.getBoolean(false) ? "YES" : "no";
-      case kDouble:
-        double v = entry.getDouble(0);
-        return Math.abs(v) >= 100 ? String.format("%.0f", v) : String.format("%.2f", v);
-      case kString:
-        return entry.getString("-");
-      default:
-        return "-";
-    }
-  }
-
-  private JLabel heading(String text) {
-    JLabel label = new JLabel(text);
-    label.setForeground(ACCENT);
-    label.setFont(label.getFont().deriveFont(Font.BOLD, 14f));
-    label.setAlignmentX(JPanel.LEFT_ALIGNMENT);
-    return label;
-  }
-
-  private JLabel note(String text) {
-    JLabel label = new JLabel("<html><body style='width:520px'>" + text + "</body></html>");
-    label.setForeground(DIM);
-    label.setAlignmentX(JPanel.LEFT_ALIGNMENT);
-    label.setBorder(BorderFactory.createEmptyBorder(2, 0, 8, 0));
-    return label;
-  }
-
-  private JPanel labelledRow(String caption, java.awt.Component field) {
-    JPanel row = new JPanel();
-    row.setLayout(new BoxLayout(row, BoxLayout.X_AXIS));
-    row.setBackground(BG);
-    row.setAlignmentX(JPanel.LEFT_ALIGNMENT);
-    row.setMaximumSize(new Dimension(420, 32));
-
-    JLabel label = new JLabel(caption);
-    label.setForeground(TEXT);
-    label.setPreferredSize(new Dimension(90, 24));
-    row.add(label);
-    row.add(field);
-    row.add(Box.createHorizontalGlue());
-    return row;
-  }
-
 }

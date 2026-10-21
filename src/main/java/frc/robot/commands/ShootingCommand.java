@@ -16,6 +16,10 @@ public class ShootingCommand extends SequentialCommandGroup {
   private static final double STOP_BACKFEED_SECONDS = 1.00;
   private static final double SECOND_FEED_SECONDS = 1.00;
 
+  /** How long the timed steps take end to end. The auto preview's timeline uses it. */
+  public static final double TOTAL_SECONDS =
+      SPINUP_SECONDS + FIRST_FEED_SECONDS + STOP_BACKFEED_SECONDS;
+
   public ShootingCommand(
       ShooterSubsystem shooter,
       KickerSubsystem kicker,

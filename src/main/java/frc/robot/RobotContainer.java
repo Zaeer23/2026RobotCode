@@ -22,11 +22,11 @@ import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import edu.wpi.first.wpilibj2.command.button.Trigger;
 import frc.robot.Constants.OperatorConstants;
+import frc.robot.auto.AutoCatalog;
 import frc.robot.controls.ControlBinder;
 import frc.robot.controls.ControlConfig;
 import frc.robot.controls.ControlProfile.Action;
 import frc.robot.controls.RemappableController;
-import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import frc.robot.commands.ShootingCommand;
 import frc.robot.subsystems.HopperSubsystem;
@@ -161,7 +161,8 @@ private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
     m_superstructure, m_shooter, m_turret, drivebase, m_camera, m_controls
 );
 
-  private final SendableChooser<Command> autoChooser = new SendableChooser<>();
+  /** The auto chooser, plus the field preview of each routine the dashboard draws. */
+  private final AutoCatalog autoCatalog = new AutoCatalog(this::loadAuto);
   public RobotContainer()
   {
     // Configure the trigger bindings
@@ -183,6 +184,9 @@ private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
   private static final double AUTO_SHOT_TIMEOUT_SECONDS = 3.5;
   private static final double BLIND_SPINUP_SECONDS = 1.2;
   private static final double BLIND_FEED_SECONDS = 1.5;
+  private static final double AUTO_ALIGN_TIMEOUT_SECONDS = 2.0;
+  /** How long FeedCorral pushes FUEL out through the intake. Enough to empty the hopper. */
+  private static final double CORRAL_FEED_SECONDS = 2.0;
 
   /**
    * Commands the PathPlanner {@code .auto} files call by name.
@@ -198,7 +202,35 @@ private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
     NamedCommands.registerCommand("IntakeDown", m_superstructure.setIntakeDeployAndRoll());
     NamedCommands.registerCommand("StopAll", m_superstructure.stopAllCommand());
     NamedCommands.registerCommand(
-        "AlignToHub", m_superstructure.alignDriveToTagCommand(drivebase).withTimeout(2.0));
+        "AlignToHub",
+        m_superstructure.alignDriveToTagCommand(drivebase).withTimeout(AUTO_ALIGN_TIMEOUT_SECONDS));
+    NamedCommands.registerCommand("FeedCorral", feedCorralCommand());
+
+    // How long each one holds a routine up, for the dashboard's auto preview timeline. The rest
+    // either finish instantly or only ever run alongside a path.
+    autoCatalog.setStepSeconds("Shoot", AUTO_SHOT_TIMEOUT_SECONDS);
+    autoCatalog.setStepSeconds("AlignToHub", AUTO_ALIGN_TIMEOUT_SECONDS);
+    autoCatalog.setStepSeconds("FeedCorral", CORRAL_FEED_SECONDS);
+  }
+
+  /**
+   * Hands FUEL to the HUMAN PLAYER: pushes it out of the intake, through the opening at the base
+   * of the OUTPOST, into the CORRAL.
+   *
+   * <p>The paths park the robot squared against the OUTPOST with the intake facing it, centred on
+   * the opening. G405 allows FUEL to leave the FIELD only this way. The HUMAN PLAYER can then throw
+   * it into the HUB (G425), or keep it for TELEOP.
+   *
+   * <p>Runs the intake backwards with the hopper reversing behind it, so the hopper empties out the
+   * front. X-locked like a shot, so the robot does not creep away from the opening while it pushes.
+   */
+  private Command feedCorralCommand()
+  {
+    Command eject = Commands.parallel(
+        m_superstructure.ejectCommand(),
+        m_superstructure.hopperReverseCommand())
+        .withTimeout(CORRAL_FEED_SECONDS);
+    return Commands.deadline(eject, drivebase.holdStillCommand()).withName("Auto.FeedCorral");
   }
 
   /**
@@ -247,18 +279,84 @@ private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
     // Authored on the BLUE side only. PathPlanner mirrors them for red through the
     // shouldFlipPath supplier in setupPathPlanner(), and 2026 Rebuilt is rotationally
     // symmetric, which is PathPlanner's default. Do not hand-write red copies.
-    // Trench routes first: they run under the trench rather than beside it, which is what the
-    // open-floor routes kept clipping.
-    autoChooser.setDefaultOption("Trench bottom - cycle (3 shots)", loadAuto("Trench Bottom Cycle"));
-    autoChooser.addOption("Trench top - cycle (3 shots)", loadAuto("Trench Top Cycle"));
-    autoChooser.addOption("Trench bottom - safe (2 shots)", loadAuto("Trench Bottom Safe"));
-    autoChooser.addOption("Trench top - safe (2 shots)", loadAuto("Trench Top Safe"));
-    autoChooser.addOption("Neutral zone denial", loadAuto("Neutral Zone Denial"));
-    autoChooser.addOption(
+    //
+    // Twenty routines built for the full 20 s AUTO, four from each of the five legal starting
+    // spots: low trench, low bump, centre, high bump, high trench ("low" is the OUTPOST side).
+    // Each robot starts squared with its BUMPERS over the ROBOT STARTING LINE (G303), crosses the
+    // barrier only under a TRENCH, never crosses the CENTER LINE (G403), and shoots only from
+    // inside the ALLIANCE ZONE (G407). AutoPathsTest checks every one of those.
+    //
+    // "Hold" routines keep the 8 preloaded FUEL and shoot them with the first load, which saves a
+    // whole shot's worth of time. "Chute" ones collect the 24 FUEL the HUMAN PLAYER releases from
+    // the OUTPOST CHUTE at the start of AUTO, so tell them. "to HP" ones finish by feeding a load
+    // into the CORRAL for the HUMAN PLAYER.
+    autoCatalog.addPathPlanner(
+        "01 Low Trench - Hold, Neutral x2",
+        "R26 01 Low Trench - Hold, Neutral x2", true);
+    autoCatalog.addPathPlanner(
+        "02 Low Trench - Hold, Neutral, Chute",
+        "R26 02 Low Trench - Hold, Neutral, Chute", false);
+    autoCatalog.addPathPlanner(
+        "03 Low Trench - Hold, Chute, Neutral to HP",
+        "R26 03 Low Trench - Hold, Chute, Neutral to HP", false);
+    autoCatalog.addPathPlanner(
+        "04 Low Trench - Hold, Chute, Neutral",
+        "R26 04 Low Trench - Hold, Chute, Neutral", false);
+    autoCatalog.addPathPlanner(
+        "05 Low Bump - Hold, Neutral x2",
+        "R26 05 Low Bump - Hold, Neutral x2", false);
+    autoCatalog.addPathPlanner(
+        "06 Low Bump - Hold, Neutral, Chute",
+        "R26 06 Low Bump - Hold, Neutral, Chute", false);
+    autoCatalog.addPathPlanner(
+        "07 Low Bump - Hold, Chute, Neutral",
+        "R26 07 Low Bump - Hold, Chute, Neutral", false);
+    autoCatalog.addPathPlanner(
+        "08 Low Bump - Hold, Chute, Neutral to HP",
+        "R26 08 Low Bump - Hold, Chute, Neutral to HP", false);
+    autoCatalog.addPathPlanner(
+        "09 Center - Preload, Depot, Chute",
+        "R26 09 Center - Preload, Depot, Chute", false);
+    autoCatalog.addPathPlanner(
+        "10 Center - Hold, Chute, Neutral to HP",
+        "R26 10 Center - Hold, Chute, Neutral to HP", false);
+    autoCatalog.addPathPlanner(
+        "11 Center - Hold, Depot, Neutral",
+        "R26 11 Center - Hold, Depot, Neutral", false);
+    autoCatalog.addPathPlanner(
+        "12 Center - Hold, Chute, Neutral",
+        "R26 12 Center - Hold, Chute, Neutral", false);
+    autoCatalog.addPathPlanner(
+        "13 High Bump - Hold, Depot, Neutral",
+        "R26 13 High Bump - Hold, Depot, Neutral", false);
+    autoCatalog.addPathPlanner(
+        "14 High Bump - Hold, Neutral x2",
+        "R26 14 High Bump - Hold, Neutral x2", false);
+    autoCatalog.addPathPlanner(
+        "15 High Bump - Hold, Neutral, Depot to HP",
+        "R26 15 High Bump - Hold, Neutral, Depot to HP", false);
+    autoCatalog.addPathPlanner(
+        "16 High Bump - Hold, Neutral, Depot",
+        "R26 16 High Bump - Hold, Neutral, Depot", false);
+    autoCatalog.addPathPlanner(
+        "17 High Trench - Hold, Neutral x2",
+        "R26 17 High Trench - Hold, Neutral x2", false);
+    autoCatalog.addPathPlanner(
+        "18 High Trench - Hold, Neutral, Depot",
+        "R26 18 High Trench - Hold, Neutral, Depot", false);
+    autoCatalog.addPathPlanner(
+        "19 High Trench - Hold, Depot, Neutral",
+        "R26 19 High Trench - Hold, Depot, Neutral", false);
+    autoCatalog.addPathPlanner(
+        "20 High Trench - Hold, Neutral, Depot to HP",
+        "R26 20 High Trench - Hold, Neutral, Depot to HP", false);
+    autoCatalog.addInPlace(
         "Blind timed shoot (no vision)",
-        new ShootingCommand(m_shooter, m_kicker, m_hopper));
-    autoChooser.addOption("Do nothing", Commands.none());
-    SmartDashboard.putData("Auto Routine", autoChooser);
+        new ShootingCommand(m_shooter, m_kicker, m_hopper),
+        "Timed shot, no vision",
+        ShootingCommand.TOTAL_SECONDS);
+    autoCatalog.addNothing("Do nothing", Commands.none());
+    autoCatalog.publish();
   }
 
   /**
@@ -565,7 +663,7 @@ private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
    */
   public Command getAutonomousCommand()
   {
-    return autoChooser.getSelected();
+    return autoCatalog.getSelected();
   }
 
   public void setMotorBrake(boolean brake)

@@ -4,7 +4,7 @@ import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
-import java.awt.RenderingHints;
+import java.awt.geom.RoundRectangle2D;
 
 import javax.swing.JPanel;
 import javax.swing.Timer;
@@ -22,21 +22,19 @@ import javax.swing.Timer;
  */
 public class Visualizer extends JPanel {
 
-  private static final int BANDS = 28;
+  private static final int BANDS = 40;
   private static final double FALL_RATE = 0.12;
 
-  private static final Color BACKGROUND = new Color(0x1E, 0x20, 0x24);
-  private static final Color BAR_LOW = new Color(0x3D, 0xDC, 0x84);
-  private static final Color BAR_HIGH = new Color(0x4C, 0xC2, 0xFF);
-  private static final Color IDLE = new Color(0x3A, 0x3E, 0x45);
+  private static final Color BAR_LOW = Theme.ACCENT;
+  private static final Color BAR_HIGH = Theme.ROUTE_INTAKE;
 
   private final MusicPlayer player;
   private final double[] levels = new double[BANDS];
 
   public Visualizer(MusicPlayer player) {
     this.player = player;
-    setPreferredSize(new Dimension(240, 48));
-    setBackground(BACKGROUND);
+    setPreferredSize(new Dimension(240, 120));
+    setOpaque(false);
 
     Timer timer = new Timer(20, e -> {
       sample();
@@ -50,7 +48,7 @@ public class Visualizer extends JPanel {
 
     if (samples.length == 0 || !player.isPlaying()) {
       for (int i = 0; i < BANDS; i++) {
-        levels[i] = Math.max(0.0, levels[i] - FALL_RATE);
+        levels[i] = Math.max(resting(i), levels[i] - FALL_RATE);
       }
       return;
     }
@@ -75,31 +73,38 @@ public class Visualizer extends JPanel {
     }
   }
 
+  /**
+   * Bars mirrored about the middle, like a waveform, so the panel is balanced whether the music
+   * is loud or silent.
+   */
   @Override
   protected void paintComponent(Graphics g) {
-    super.paintComponent(g);
     Graphics2D g2 = (Graphics2D) g.create();
-    g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+    Theme.smooth(g2);
 
     int w = getWidth();
     int h = getHeight();
-    int gap = 2;
-    int barWidth = Math.max(1, (w - gap * (BANDS - 1)) / BANDS);
+    double mid = h / 2.0;
+    double gap = 4;
+    double barWidth = Math.max(2, (w - gap * (BANDS - 1)) / BANDS);
+    double arc = Math.min(barWidth, 8);
 
     for (int i = 0; i < BANDS; i++) {
-      int x = i * (barWidth + gap);
-      int barHeight = (int) (levels[i] * (h - 4));
-
-      g2.setColor(IDLE);
-      g2.fillRect(x, h - 2, barWidth, 2);
-
-      if (barHeight > 0) {
-        float t = i / (float) (BANDS - 1);
-        g2.setColor(blend(BAR_LOW, BAR_HIGH, t));
-        g2.fillRoundRect(x, h - barHeight - 2, barWidth, barHeight, 2, 2);
-      }
+      double x = i * (barWidth + gap);
+      double barHeight = Math.max(4, levels[i] * (h - 8));
+      Color colour = blend(BAR_LOW, BAR_HIGH, i / (float) (BANDS - 1));
+      g2.setPaint(new java.awt.LinearGradientPaint(
+          0f, (float) (mid - barHeight / 2), 0f, (float) (mid + barHeight / 2 + 0.01),
+          new float[] {0f, 0.5f, 1f},
+          new Color[] {Theme.alpha(colour, 110), colour, Theme.alpha(colour, 110)}));
+      g2.fill(new RoundRectangle2D.Double(x, mid - barHeight / 2, barWidth, barHeight, arc, arc));
     }
     g2.dispose();
+  }
+
+  /** A low, still skyline shown while nothing plays, so the panel never looks broken. */
+  private static double resting(int band) {
+    return 0.02 + 0.015 * Math.abs(Math.sin(band * 0.55) * Math.sin(band * 0.21));
   }
 
   private static Color blend(Color a, Color b, float t) {
