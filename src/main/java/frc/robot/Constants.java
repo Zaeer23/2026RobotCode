@@ -160,18 +160,19 @@ public final class Constants
      * (straight out the back). Re-measure after any rebuild that disturbs the turret zero: vision tracking commands
      * ABSOLUTE turret angles, so an error here becomes a constant aiming bias.
      *
-     * <p>Measured on the robot 2026-10-22: the turret aimed about 10 degrees right (CW) of the
-     * tag, by the same amount whether the robot was close to it or far from it. A bias that does
-     * not change with range is angular, not positional, so it is the turret zero rather than the
-     * camera's 8.5 inch side offset or the range bias -- those would both grow as the robot
-     * closed in. Positive is CCW, so +10 swings the shot back left.
+     * <p>Measured on the robot 2026-10-22, in two passes. The turret first aimed about 10 degrees
+     * right (CW) of the tag, by the same amount whether the robot was close to it or far from it.
+     * A bias that does not change with range is angular, not positional, so it is the turret zero
+     * rather than the camera's 8.5 inch side offset or the range bias -- those would both grow as
+     * the robot closed in. +10 left about 5 degrees of the same bias still to the right, so the
+     * full correction is 15. Positive is CCW, which swings the shot back left.
      *
      * <p>This value and {@code Turret/AimTrimDegrees} are added at the same point in
      * {@code TurretAimCommand.solveTurretAngle}, so they stack. If the trim was dialled in to
      * cover this bias, zero it (Turret/ResetAimTrim on the dashboard) or the correction applies
      * twice and the shot swings 20 degrees the other way.
      */
-    public static final double ENCODER_OFFSET_DEGREES = 10.0;
+    public static final double ENCODER_OFFSET_DEGREES = 15.0;
 
     /**
      * Robot-frame direction the shooter points when the turret encoder reads zero, CCW-positive.
