@@ -54,7 +54,15 @@ public class TurretSubsystem extends SubsystemBase {
   private double lastDriveReportSeconds = -1.0;
 
   private static final String AIM_TRIM_KEY = "Turret/AimTrimDegrees";
-  private static final double MAX_AIM_TRIM_DEGREES = 10.0;
+  /**
+   * How far the saved trim may pull the shot either way.
+   *
+   * <p>Was 10, which put a measured 10 degree bias exactly on the clamp: the trim could just
+   * reach it with nothing left over, and any fine adjustment afterwards did nothing silently.
+   * A limit still exists because trim is meant to correct a small residual bias, and a trim large
+   * enough to swing the turret across the field is hiding a wrong constant rather than tuning one.
+   */
+  private static final double MAX_AIM_TRIM_DEGREES = 20.0;
   private double aimTrimDegrees = 0.0;
 
   public final Translation3d turretTranslation = Constants.TurretConstants.PIVOT_TO_ROBOT_CENTER;
@@ -99,7 +107,8 @@ public class TurretSubsystem extends SubsystemBase {
     Preferences.initDouble(AIM_TRIM_KEY, 0.0);
     setAimTrimDegrees(Preferences.getDouble(AIM_TRIM_KEY, 0.0));
     SmartDashboard.putString("Turret/AimTrimHelp",
-        "Positive = left/CCW viewed along the shot; negative = right/CW. Limit +/-10 deg.");
+        "Positive = left (CCW) viewed along the shot; negative = right (CW). Limit +/-20 deg. "
+            + "Type a value here directly - you do not have to press the bumpers 20 times.");
     SmartDashboard.putData("Turret/ResetAimTrim", Commands.runOnce(() -> setAimTrimDegrees(0.0))
         .ignoringDisable(true).withName("Turret.resetAimTrim"));
   }
