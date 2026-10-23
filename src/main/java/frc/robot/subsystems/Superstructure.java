@@ -343,7 +343,15 @@ public Command manualTurretControl(Supplier<Double> speedSupplier) {
    * this does not fight the driver for the chassis.
    */
   public Command shootWhenReadyCommand() {
-    Command spin = shooter.spinUp();
+    // Spin for the range the camera is actually reporting, re-evaluated every loop so the speed
+    // tracks the robot as it settles. This was shooter.spinUp(), one fixed RPM for every shot on
+    // the field: correct at about 4 m and wrong everywhere else.
+    //
+    // With no HUB tag in view getHubDistanceMeters() returns -1 and the model returns 0, which
+    // setSpeedDynamic already treats as "no target". The blind fallback in RobotContainer is what
+    // covers that case, not a guessed speed here.
+    Command spin = shooter.setSpeedDynamic(
+        () -> RPM.of(ShotModel.rpmForDistance(getHubDistanceMeters())));
     // The pivot must be clear of the ball's path BEFORE anything feeds. Raising it in parallel
     // with the spin-up costs no time, because the flywheel takes longer to reach speed than the
     // pivot takes to lift.
