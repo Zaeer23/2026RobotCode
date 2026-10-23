@@ -4,6 +4,11 @@
     "type" : "sequential",
     "data" : {
       "commands" : [ {
+        "type" : "named",
+        "data" : {
+          "name" : "GravityDeploy"
+        }
+      }, {
         "type" : "path",
         "data" : {
           "pathName" : "C Start to Shot"

@@ -4,6 +4,11 @@
     "type" : "sequential",
     "data" : {
       "commands" : [ {
+        "type" : "named",
+        "data" : {
+          "name" : "GravityDeploy"
+        }
+      }, {
         "type" : "deadline",
         "data" : {
           "commands" : [ {

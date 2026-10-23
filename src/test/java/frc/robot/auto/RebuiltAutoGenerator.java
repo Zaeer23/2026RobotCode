@@ -283,6 +283,15 @@ public final class RebuiltAutoGenerator {
   private static final Step SHOOT = new Step("named", "Shoot", false);
   private static final Step FEED = new Step("named", "FeedOutpost", false);
 
+  /**
+   * Drops the pivot with gravity and inertia, for the CyberPsycho contingency.
+   *
+   * <p>A step of its own rather than something running alongside a path, because it shakes the
+   * whole chassis and so has to own the drivebase. It goes first in every routine: there is no
+   * point driving to a pile of FUEL with the intake still folded up.
+   */
+  private static final Step GRAVITY_DEPLOY = new Step("named", "GravityDeploy", false);
+
   private static Step leg(String name, List<Wp> pts, boolean intake, List<Slow> slow)
       throws IOException {
     return new Step("path", writePath(name, pts, slow), intake);
@@ -363,6 +372,7 @@ public final class RebuiltAutoGenerator {
     Wp depotEnd = row.get(row.size() - 1);
 
     List<Step> steps = new ArrayList<>();
+    steps.add(GRAVITY_DEPLOY);
     steps.add(toDepot(startKey + " Start", start));
 
     // Shoot from where the DEPOT sweep ends, without driving to a separate shooting pose first.
@@ -405,6 +415,7 @@ public final class RebuiltAutoGenerator {
     Wp start = START.get(startKey);
     Wp shotPose = SHOT.get(startKey);
     List<Step> steps = new ArrayList<>();
+    steps.add(GRAVITY_DEPLOY);
 
     // Roll off the line to a shooting pose and fire the preload before going anywhere. A routine
     // has to open with a path: shooting from the starting spot itself means the robot never

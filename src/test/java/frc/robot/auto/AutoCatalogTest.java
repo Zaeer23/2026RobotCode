@@ -160,8 +160,18 @@ public class AutoCatalogTest {
 
   @Test
   void previewStartsWhereTheFirstPathStarts() throws Exception {
-    JsonNode first = catalog().stepsOf(rebuiltAutos().get(0)).get(0);
-    assertEquals("drive", first.path("kind").asText());
+    // The FIRST DRIVE, not literally step 0. A routine may open with an action -- the gravity
+    // deploy shakes the robot before it goes anywhere -- and the start pose still has to be
+    // declared by the first path that follows.
+    JsonNode steps = catalog().stepsOf(rebuiltAutos().get(0));
+    JsonNode first = null;
+    for (JsonNode step : steps) {
+      if ("drive".equals(step.path("kind").asText())) {
+        first = step;
+        break;
+      }
+    }
+    assertTrue(first != null, "no drive step at all");
 
     // Squared on the ROBOT STARTING LINE. Which lane depends on the routine, so this checks the
     // line rather than one particular spot on it -- naming a y here breaks whenever the set of

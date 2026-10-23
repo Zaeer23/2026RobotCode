@@ -28,6 +28,7 @@ import frc.robot.controls.ControlConfig;
 import frc.robot.controls.ControlProfile.Action;
 import frc.robot.controls.RemappableController;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
+import frc.robot.commands.GravityDeployCommand;
 import frc.robot.commands.ShootingCommand;
 import frc.robot.subsystems.HopperSubsystem;
 import frc.robot.subsystems.IntakeSubsystem;
@@ -200,6 +201,9 @@ private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
    */
   private static final double OUTPOST_DWELL_SECONDS = 1.0;
 
+  /** Worst case for the gravity drop: GravityDeployCommand gives up at 2.5 s. */
+  private static final double GRAVITY_DEPLOY_SECONDS = 2.5;
+
   /**
    * Commands the PathPlanner {@code .auto} files call by name.
    *
@@ -218,11 +222,18 @@ private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
         m_superstructure.alignDriveToTagCommand(drivebase).withTimeout(AUTO_ALIGN_TIMEOUT_SECONDS));
     NamedCommands.registerCommand("FeedOutpost", feedOutpostCommand());
 
+    // CyberPsycho contingency: drops the pivot with gravity and inertia when it can no longer
+    // drive itself down. Owns the drivebase while it shakes, so it is a step of its own rather
+    // than something that can run alongside a path.
+    NamedCommands.registerCommand("GravityDeploy",
+        new GravityDeployCommand(drivebase, m_intake));
+
     // How long each one holds a routine up, for the dashboard's auto preview timeline. The rest
     // either finish instantly or only ever run alongside a path.
     autoCatalog.setStepSeconds("Shoot", AUTO_SHOT_TIMEOUT_SECONDS);
     autoCatalog.setStepSeconds("AlignToHub", AUTO_ALIGN_TIMEOUT_SECONDS);
     autoCatalog.setStepSeconds("FeedOutpost", OUTPOST_FEED_SECONDS + OUTPOST_DWELL_SECONDS);
+    autoCatalog.setStepSeconds("GravityDeploy", GRAVITY_DEPLOY_SECONDS);
   }
 
   /**

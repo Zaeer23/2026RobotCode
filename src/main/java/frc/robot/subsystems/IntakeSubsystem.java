@@ -187,6 +187,75 @@ public class IntakeSubsystem extends SubsystemBase {
     return Commands.runOnce(() -> pivotMotor.getEncoder().setPosition(0), this).withName("IntakePivot.Rezero");
   }
 
+  // ---- Gravity deploy (CyberPsycho contingency) ---------------------------------------------
+  // For when the pivot can no longer drive itself down and has to fall instead. These are the
+  // intake's half of it; GravityDeployCommand drives the chassis half.
+
+  /**
+   * Releases the pivot so gravity can take it, or clamps it again.
+   *
+   * <p>BRAKE is what normally stops the pivot falling, so it is also what stops this working. The
+   * controller is reconfigured live rather than at construction because the robot needs both:
+   * coast to drop it, brake to hold it there afterwards.
+   *
+   * <p>This needs the CONTROLLER alive, not the drivetrain to the pivot. If a belt or gearbox
+   * stripped, the controller is fine and this works. If the controller itself is dead, nothing
+   * here helps.
+   */
+  public void setPivotCoast(boolean coast) {
+    com.revrobotics.spark.config.SparkMaxConfig config =
+        new com.revrobotics.spark.config.SparkMaxConfig();
+    config.idleMode(coast
+        ? com.revrobotics.spark.config.SparkBaseConfig.IdleMode.kCoast
+        : com.revrobotics.spark.config.SparkBaseConfig.IdleMode.kBrake);
+    pivotMotor.configure(config,
+        com.revrobotics.spark.SparkBase.ResetMode.kNoResetSafeParameters,
+        com.revrobotics.spark.SparkBase.PersistMode.kNoPersistParameters);
+    frc.robot.util.RobotLog.put("IntakePivot/Coasting", coast);
+  }
+
+  /** Lets go of the pivot and stops commanding it, so nothing fights the fall. */
+  public Command releasePivotCommand() {
+    return Commands.runOnce(() -> {
+      setPivotCoast(true);
+      pivotMotor.set(0);
+    }, this).ignoringDisable(true).withName("IntakePivot.Release");
+  }
+
+  /** Clamps the pivot wherever it ended up, so driving does not swing it back up. */
+  public Command holdPivotCommand() {
+    return Commands.runOnce(() -> {
+      pivotMotor.set(0);
+      setPivotCoast(false);
+    }, this).ignoringDisable(true).withName("IntakePivot.Hold");
+  }
+
+  /**
+   * Runs the rollers backwards to drag the pivot down by reaction torque.
+   *
+   * <p>The rollers sit out at the end of the arm, so spinning them against the carpet pushes back
+   * on it. It is not much torque, but the arm only has to be nudged past wherever it is hanging
+   * up; gravity does the rest.
+   *
+   * <p>Deliberately never touches the pivot motor. This only runs while the pivot is coasting,
+   * and commanding it would defeat the point.
+   */
+  public Command gravityAssistRollersCommand() {
+    return Commands.run(() -> runGravityAssistRollers(true), this)
+        .finallyDo(() -> runGravityAssistRollers(false))
+        .withName("Intake.GravityAssistRollers");
+  }
+
+  /** The same thing as a plain call, for commands that already own this subsystem. */
+  public void runGravityAssistRollers(boolean on) {
+    smc.setDutyCycle(on ? -INTAKE_SPEED : 0.0);
+  }
+
+  /** Raw pivot angle, for telling whether the drop actually worked. */
+  public double pivotAngleDegrees() {
+    return intakePivot.getAngle().in(Degrees);
+  }
+
   /**
    * Drops the intake and collects.
    *

@@ -34,7 +34,8 @@ public class AutoPathsTest {
 
   /** Must match the names registered in RobotContainer.registerAutoCommands(). */
   private static final Set<String> REGISTERED_COMMANDS =
-      Set.of("Shoot", "SpinUp", "IntakeDown", "StopAll", "AlignToHub", "FeedOutpost");
+      Set.of("Shoot", "SpinUp", "IntakeDown", "StopAll", "AlignToHub", "FeedOutpost",
+          "GravityDeploy");
 
   /** 0.9 m square with bumpers, as in PathPlanner's settings. */
   private static final double ROBOT_HALF_WIDTH = 0.45;
