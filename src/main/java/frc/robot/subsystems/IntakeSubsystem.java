@@ -73,6 +73,26 @@ public class IntakeSubsystem extends SubsystemBase {
    */
   private static final double PIVOT_DESCENT_OUTPUT_DEADBAND = 0.05;
 
+  // ---- Pivot gearing -----------------------------------------------------------------------
+  // Motor rotations to pivot degrees. Every commanded angle scales with this, and the soft
+  // limits are in degrees, so a stale value does not read as "slightly off" -- it drives the
+  // pivot into a hard stop. Re-measure with printGearingCalibrationCommand() after any gearbox
+  // change rather than reasoning about it.
+
+  private static final double PIVOT_STAGE_1 = 5.0;
+  private static final double PIVOT_STAGE_2 = 5.0;
+
+  /**
+   * Final stage: the small sprocket driving the big one, as driven/driver teeth.
+   *
+   * <p>60/18 = 3.333 is the ORIGINAL pair and is believed to be out of date: the gearbox was
+   * changed to a smaller reduction, but the new tooth counts were not recorded. Until they are,
+   * this number is wrong in the direction that makes the pivot overshoot.
+   */
+  private static final double PIVOT_FINAL_STAGE = 60.0 / 18.0;
+
+  private static final double PIVOT_GEARING = PIVOT_STAGE_1 * PIVOT_STAGE_2 * PIVOT_FINAL_STAGE;
+
   // Pivot oscillation is commanded as raw duty cycle, not as a position setpoint. At a 0.18-0.20s
   // period the closed-loop controller never reaches either endpoint before the target flips, so it
   // only ever integrates against itself; driving the motor open-loop actually produces the shake.
@@ -109,7 +129,8 @@ public class IntakeSubsystem extends SubsystemBase {
       .withClosedLoopController(25, 0, 0, DegreesPerSecond.of(360), DegreesPerSecondPerSecond.of(360))
       .withFeedforward(new SimpleMotorFeedforward(0, 0, 0))
       .withTelemetry("IntakePivotMotor", TelemetryVerbosity.HIGH)
-      .withGearing(new MechanismGearing(GearBox.fromReductionStages(5, 5, 60.0 / 18.0)))
+      .withGearing(new MechanismGearing(
+          GearBox.fromReductionStages(PIVOT_STAGE_1, PIVOT_STAGE_2, PIVOT_FINAL_STAGE)))
       .withMotorInverted(false)
       .withIdleMode(MotorMode.BRAKE)
       .withSoftLimit(Degrees.of(PIVOT_MIN_DEGREES), Degrees.of(PIVOT_MAX_DEGREES))
@@ -316,6 +337,56 @@ public class IntakeSubsystem extends SubsystemBase {
   public void periodic() {
     intake.updateTelemetry();
     intakePivot.updateTelemetry();
+
+    // Raw motor rotations, which the gearing calibration below is read from. The mechanism angle
+    // already has the gearing applied, so it cannot tell you the gearing is wrong -- it reports
+    // whatever the configured ratio implies, confidently, right up until the pivot hits a stop.
+    frc.robot.util.RobotLog.put("IntakePivot/RawMotorRotations",
+        pivotMotor.getEncoder().getPosition());
+  }
+
+  /**
+   * Works out the real pivot gear ratio from a measured sweep between the two hard stops.
+   *
+   * <p>Needed whenever the gearbox changes. PIVOT_GEARING below converts motor rotations into
+   * pivot degrees, and if it is stale every commanded angle is wrong by the same factor. A ratio
+   * that is too LARGE makes the pivot overshoot, so it drives past the deployed angle and into
+   * the hard stop on every single deploy.
+   *
+   * <p>Procedure, with the robot DISABLED so nothing drives the pivot while it is moved by hand:
+   *
+   * <ol>
+   *   <li>Put the pivot against the stowed hard stop.</li>
+   *   <li>Press the rezero binding to make that position zero.</li>
+   *   <li>Move it by hand to the deployed hard stop, a known {@value #PIVOT_MAX_DEGREES} degrees
+   *       of travel.</li>
+   *   <li>Run this. It prints the ratio that fits what the motor actually turned.</li>
+   * </ol>
+   */
+  public Command printGearingCalibrationCommand() {
+    return Commands.runOnce(() -> {
+      double rotations = Math.abs(pivotMotor.getEncoder().getPosition());
+      double sweptDegrees = PIVOT_MAX_DEGREES - PIVOT_MIN_DEGREES;
+
+      System.out.println("=== INTAKE PIVOT GEARING ===");
+      System.out.printf("  motor turned %.3f rotations over a %.0f degree sweep%n",
+          rotations, sweptDegrees);
+
+      if (rotations < 0.05) {
+        System.out.println("  Too little movement to measure. Rezero at one hard stop, move the");
+        System.out.println("  pivot to the other by hand, then run this again.");
+        System.out.println("============================");
+        return;
+      }
+
+      double measured = rotations / (sweptDegrees / 360.0);
+      System.out.printf("  measured ratio   %.3f : 1%n", measured);
+      System.out.printf("  configured ratio %.3f : 1%n", PIVOT_GEARING);
+      System.out.printf("  final stage would be %.3f (currently %.3f)%n",
+          measured / (PIVOT_STAGE_1 * PIVOT_STAGE_2), PIVOT_FINAL_STAGE);
+      System.out.println("  Put that last number into PIVOT_FINAL_STAGE in IntakeSubsystem.");
+      System.out.println("============================");
+    }).ignoringDisable(true).withName("IntakePivot.PrintGearingCalibration");
   }
 
   @Override

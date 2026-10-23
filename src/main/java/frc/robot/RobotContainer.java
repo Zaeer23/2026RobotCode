@@ -506,6 +506,11 @@ private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
 
     operatorDiagnostic.and(shooterXbox.x())
         .onTrue(m_camera.toggleTargetFilterCommand());
+
+    // Measures the real intake pivot gear ratio from a hand sweep between the hard stops. Run it
+    // DISABLED: rezero at one stop, move the pivot to the other by hand, then press this.
+    operatorDiagnostic.and(shooterXbox.start())
+        .onTrue(m_intake.printGearingCalibrationCommand());
   }
 
   /**
