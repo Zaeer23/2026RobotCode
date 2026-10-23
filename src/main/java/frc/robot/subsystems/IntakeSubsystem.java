@@ -57,7 +57,14 @@ public class IntakeSubsystem extends SubsystemBase {
   private static final double PIVOT_SHOOT_DEGREES = 75.0;
 
   private static final double PIVOT_BOUNCE_PERIOD_SECONDS = 0.18;
-  private static final double PIVOT_INTAKE_OSCILLATE_PERIOD_SECONDS = 0.20;
+  /**
+   * How far above the deployed angle still counts as "coming down".
+   *
+   * <p>The rollers backfeed while descending so the pivot can clear the hood, and intake once it
+   * is down. Without a band around the setpoint the rollers would flip direction on every small
+   * oscillation as the pivot settles.
+   */
+  private static final double PIVOT_DOWN_CLEAR_TOLERANCE_DEGREES = 8.0;
 
   // Pivot oscillation is commanded as raw duty cycle, not as a position setpoint. At a 0.18-0.20s
   // period the closed-loop controller never reaches either endpoint before the target flips, so it
@@ -148,16 +155,41 @@ public class IntakeSubsystem extends SubsystemBase {
     return Commands.runOnce(() -> pivotMotor.getEncoder().setPosition(0), this).withName("IntakePivot.Rezero");
   }
 
+  /**
+   * Drops the intake and collects.
+   *
+   * <p>Two things this deliberately does NOT do, both learned on the robot:
+   *
+   * <p>It does not bounce the pivot. An earlier version oscillated it the whole time the intake
+   * ran, copying the shake used while feeding. Bouncing belongs to the shot, where it shakes FUEL
+   * loose into the kicker; during collection it just stops the intake sitting on the floor where
+   * it can pick anything up.
+   *
+   * <p>It does not run the rollers forward the whole time. The pivot has to get past the hood on
+   * the way down, and FUEL caught in the intake jams it against that lip. So the rollers run
+   * BACKWARD while the pivot is still travelling down, clearing the throat so it can drop through,
+   * and flip to intaking only once it is actually down. Reversing the whole time would spit out
+   * what we just collected, so this is strictly while descending.
+   */
   public Command deployAndRollCommand() {
     return Commands.run(() -> {
-      double phaseSeconds = Timer.getFPGATimestamp() % PIVOT_INTAKE_OSCILLATE_PERIOD_SECONDS;
-      boolean highPhase = phaseSeconds < (PIVOT_INTAKE_OSCILLATE_PERIOD_SECONDS / 2.0);
-      pivotMotor.set(highPhase ? PIVOT_BOUNCE_UP_OUTPUT : PIVOT_BOUNCE_DOWN_OUTPUT);
-      smc.setDutyCycle(INTAKE_SPEED);
+      intakePivotController.setPosition(Degrees.of(PIVOT_DEPLOY_DEGREES));
+      smc.setDutyCycle(isPivotDescending() ? -INTAKE_SPEED : INTAKE_SPEED);
     }, this).finallyDo(() -> {
       pivotMotor.set(0);
       smc.setDutyCycle(0);
     }).withName("Intake.DeployAndRoll");
+  }
+
+  /**
+   * True while the pivot is still above its deployed position, i.e. still on its way down.
+   *
+   * <p>The tolerance is what stops the rollers flickering between backfeed and intake once the
+   * pivot settles: without it, the smallest wobble around the setpoint reverses the rollers.
+   */
+  public boolean isPivotDescending() {
+    return intakePivot.getAngle().in(Degrees)
+        > PIVOT_DEPLOY_DEGREES + PIVOT_DOWN_CLEAR_TOLERANCE_DEGREES;
   }
 
   public Command backFeedAndRollCommand() {
