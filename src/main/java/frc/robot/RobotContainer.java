@@ -399,6 +399,16 @@ private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
       return;
     }
 
+    // CyberPsycho: cap the pivot's torque from boot, not just during the gravity drop. The gear
+    // is printed for the whole match, so every command that moves the pivot has to stay inside
+    // what it can carry -- a 40 A manual nudge would shear it just as surely as a 40 A deploy.
+    m_intake.setPivotCurrentLimit(IntakeSubsystem.PIVOT_LIMP_CURRENT_AMPS);
+    m_intake.setPivotCoast(true);
+    DriverStation.reportWarning(
+        "[INTAKE] CyberPsycho branch: pivot limited to "
+            + IntakeSubsystem.PIVOT_LIMP_CURRENT_AMPS
+            + " A for the printed gear, and coasting. Autos drop it with GravityDeploy.", false);
+
     m_intake.setDefaultCommand(
         m_intake.manualPivot(() -> shooterXbox.getLeftY()));
 

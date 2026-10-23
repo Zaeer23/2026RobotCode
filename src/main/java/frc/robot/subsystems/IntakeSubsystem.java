@@ -73,6 +73,21 @@ public class IntakeSubsystem extends SubsystemBase {
    */
   private static final double PIVOT_DESCENT_OUTPUT_DEADBAND = 0.05;
 
+  // ---- Printed-gear limits (CyberPsycho) -----------------------------------------------------
+
+  /**
+   * Current cap while the temporary printed gear is fitted, in amps.
+   *
+   * <p>Current is torque. A NEO makes 2.6 Nm at its 105 A stall, so through the gearing the
+   * normal 40 A reaches the arm as roughly 49 Nm -- fine for a machined gear, destructive for a
+   * printed one. 6 A is about 7 Nm at the arm: deliberately not enough to drive the pivot on its
+   * own, which is the point. It assists gravity rather than replacing it.
+   */
+  public static final int PIVOT_LIMP_CURRENT_AMPS = 6;
+
+  /** Duty cycle used with the limp current cap. The cap, not this, is what bounds the torque. */
+  private static final double PIVOT_LIMP_OUTPUT = 0.25;
+
   // ---- Pivot gearing -----------------------------------------------------------------------
   // Motor rotations to pivot degrees. Every commanded angle scales with this, and the soft
   // limits are in degrees, so a stale value does not read as "slightly off" -- it drives the
@@ -203,15 +218,56 @@ public class IntakeSubsystem extends SubsystemBase {
    * here helps.
    */
   public void setPivotCoast(boolean coast) {
+    applyPivotConfig(coast, null);
+    frc.robot.util.RobotLog.put("IntakePivot/Coasting", coast);
+  }
+
+  /**
+   * Caps the torque the pivot motor may put through the gearbox.
+   *
+   * <p>This is the whole safety mechanism for the printed gear. Current is torque: a NEO makes
+   * 2.6 Nm at its 105 A stall, so the configured limit scales straight through the gearing to the
+   * arm. At the normal 40 A that is about 49 Nm at the arm, which is fine for a machined gear and
+   * would shear a printed one. {@link #PIVOT_LIMP_CURRENT_AMPS} is sized to be survivable rather
+   * than useful on its own — enough to help gravity, not enough to drive the arm by itself.
+   */
+  public void setPivotCurrentLimit(int amps) {
+    applyPivotConfig(null, amps);
+    frc.robot.util.RobotLog.put("IntakePivot/CurrentLimitAmps", amps);
+  }
+
+  private void applyPivotConfig(Boolean coast, Integer amps) {
     com.revrobotics.spark.config.SparkMaxConfig config =
         new com.revrobotics.spark.config.SparkMaxConfig();
-    config.idleMode(coast
-        ? com.revrobotics.spark.config.SparkBaseConfig.IdleMode.kCoast
-        : com.revrobotics.spark.config.SparkBaseConfig.IdleMode.kBrake);
+    if (coast != null) {
+      config.idleMode(coast
+          ? com.revrobotics.spark.config.SparkBaseConfig.IdleMode.kCoast
+          : com.revrobotics.spark.config.SparkBaseConfig.IdleMode.kBrake);
+    }
+    if (amps != null) {
+      config.smartCurrentLimit(amps);
+    }
     pivotMotor.configure(config,
         com.revrobotics.spark.SparkBase.ResetMode.kNoResetSafeParameters,
         com.revrobotics.spark.SparkBase.PersistMode.kNoPersistParameters);
-    frc.robot.util.RobotLog.put("IntakePivot/Coasting", coast);
+  }
+
+  /** Drives the pivot down with the small torque the printed gear can survive. */
+  public void runLimpPivot(double output) {
+    pivotMotor.set(output);
+  }
+
+  /**
+   * Holds the pivot down with a gentle continuous push, rather than with the brake.
+   *
+   * <p>BRAKE shorts the windings, and the current that flows when something back-drives the arm
+   * is set by winding resistance, not by the configured limit — so a knock while braked puts an
+   * unbounded shock through the printed gear. A small commanded output is bounded by the current
+   * limit no matter what hits it, and gravity is doing most of the holding anyway.
+   */
+  public Command gentleHoldCommand() {
+    return run(() -> runLimpPivot(-PIVOT_LIMP_OUTPUT))
+        .withName("IntakePivot.GentleHold");
   }
 
   /** Lets go of the pivot and stops commanding it, so nothing fights the fall. */
