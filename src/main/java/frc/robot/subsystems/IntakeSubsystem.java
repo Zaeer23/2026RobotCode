@@ -89,11 +89,21 @@ public class IntakeSubsystem extends SubsystemBase {
    * wide. That fixes the centre distance and roughly the SUM of the two pulleys' teeth, but not
    * this ratio, which is their quotient — 18/60 and 24/48 both run happily on the same belt.
    *
-   * <p>60/18 = 3.333 is the ORIGINAL pair and is believed to be out of date: the stage was
-   * changed to a smaller reduction, but the new pulley tooth counts were not recorded. Until they
-   * are, this number is wrong in the direction that makes the pivot overshoot.
+   * <p>2.0 is an ESTIMATE, not a measurement. The stage was changed to a smaller reduction than
+   * the original 60/18 = 3.333 and the new pulley teeth were not recorded, so this is reasoned
+   * from the belt: reusing a 120-tooth belt at the same centres holds the SUM of the two pulleys
+   * near the original 18 + 60 = 78. Pairs that fit that and are smaller than 3.333 run roughly
+   * 1.6 to 2.5 — 30/48, 26/52, 24/54. 2.0 sits at the low end of that band.
+   *
+   * <p>Low on purpose. The two ways of being wrong are not equally bad: too HIGH and the pivot
+   * travels further than commanded and stalls into the hard stop on every deploy; too LOW and it
+   * stops short, which costs some intake reach and breaks nothing. If the real pair turns out to
+   * be 24/54, this undershoots a 90 degree deploy by about 10 degrees.
+   *
+   * <p>Replace it with the measurement as soon as anyone can read the pulleys or run
+   * {@link #printGearingCalibrationCommand()}. An estimate that works is still an estimate.
    */
-  private static final double PIVOT_FINAL_STAGE = 60.0 / 18.0;
+  private static final double PIVOT_FINAL_STAGE = 2.0;
 
   private static final double PIVOT_GEARING = PIVOT_STAGE_1 * PIVOT_STAGE_2 * PIVOT_FINAL_STAGE;
 
