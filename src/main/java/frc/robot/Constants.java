@@ -119,8 +119,28 @@ public final class Constants
      */
     public static final double MIN_SHOT_RPM = 2200.0;
 
-    /** Mechanical ceiling; the flywheel soft limit. Declared first so MAX_SHOT_RPM can use it. */
-    public static final double MAX_MECHANICAL_RPM = 3600.0;
+    /**
+     * Flywheel soft limit. Declared first so MAX_SHOT_RPM can use it.
+     *
+     * <p>Was 3600, which was never a mechanical limit — it was a number well under what the
+     * hardware does. The flywheel is two NEOs at 1:1, so its free speed is the motor's 5676 RPM,
+     * and 3600 is 63% of that. It was capping range at 5.29 m and putting the OUTPOST shot
+     * 4 cm out of reach for no physical reason.
+     *
+     * <p>4500 is chosen from the SysID feedforward rather than guessed. At kS 0.191 and kV 0.11858
+     * volts per rotation/second, holding 4500 RPM takes 9.08 V, which leaves 2.9 V of control
+     * authority at a fresh 12 V battery and still has headroom when a match sags it to 11. That
+     * is 79% of free speed, so the motors are not being asked to run at the top of their curve
+     * where they have no torque left to recover between shots.
+     *
+     * <p>Going further is where it stops being conservative: 5000 RPM needs 10.07 V and leaves
+     * under 2 V at a FRESH battery, which is nothing once it sags.
+     *
+     * <p>The 40 A stator limit is unchanged. It governs how fast the wheel spins back up between
+     * shots, not how fast it can turn, so a higher ceiling costs recovery time rather than
+     * risking the motors.
+     */
+    public static final double MAX_MECHANICAL_RPM = 4500.0;
 
     /**
      * Upper end of the commanded range.

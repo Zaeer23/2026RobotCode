@@ -78,13 +78,25 @@ public class ShotModelTest {
   }
 
   @Test
-  public void theOutpostShotIsOutOfReachAndSaysSo() {
-    // Outpost opening (0.50, 0.666) to hub centre (4.626, 4.035) is 5.33 m. This is the fact
-    // that decides whether an auto can shoot from the outpost: it cannot.
+  public void theOutpostShotIsReachableNowTheCeilingIsHonest() {
+    // Outpost opening (0.50, 0.666) to hub centre (4.626, 4.035) is 5.33 m. At the old 3600 RPM
+    // ceiling this was 4 cm out of reach, and that was an artificial limit rather than anything
+    // the hardware imposed: the flywheel is two NEOs at 1:1, free speed 5676. With the ceiling
+    // set from the feedforward instead, the shot is comfortably available.
     double outpostToHub = Math.hypot(4.626 - 0.50, 4.035 - 0.666);
     assertEquals(5.33, outpostToHub, 0.02);
-    assertFalse(ShotModel.isWithinRange(outpostToHub),
-        "the flywheel tops out at " + String.format("%.2f", ShotModel.maxRangeMeters())
-            + " m, so a shot from the outpost cannot be made");
+    assertTrue(ShotModel.isWithinRange(outpostToHub),
+        "outpost shot needs " + String.format("%.0f", ShotModel.idealRpm(outpostToHub))
+            + " RPM against a ceiling of " + ShooterConstants.MAX_SHOT_RPM);
+  }
+
+  @Test
+  public void reachCoversTheLongShotsTheDriversAskedFor() {
+    // 7.5 m was the shot the team said they could already make. It needs 4218 RPM, which the old
+    // 3600 ceiling refused outright.
+    assertTrue(ShotModel.isWithinRange(7.5),
+        "7.5 m needs " + String.format("%.0f", ShotModel.idealRpm(7.5)) + " RPM");
+    assertTrue(ShotModel.maxRangeMeters() > 7.5,
+        "max range is only " + String.format("%.2f", ShotModel.maxRangeMeters()) + " m");
   }
 }
