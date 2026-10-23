@@ -83,11 +83,15 @@ public class IntakeSubsystem extends SubsystemBase {
   private static final double PIVOT_STAGE_2 = 5.0;
 
   /**
-   * Final stage: the small sprocket driving the big one, as driven/driver teeth.
+   * Final stage: the small pulley driving the big one, as driven/driver teeth.
    *
-   * <p>60/18 = 3.333 is the ORIGINAL pair and is believed to be out of date: the gearbox was
-   * changed to a smaller reduction, but the new tooth counts were not recorded. Until they are,
-   * this number is wrong in the direction that makes the pivot overshoot.
+   * <p>Driven by a 600-5M-15 belt: 600 mm pitch length at 5 mm HTD pitch, so 120 teeth, 15 mm
+   * wide. That fixes the centre distance and roughly the SUM of the two pulleys' teeth, but not
+   * this ratio, which is their quotient — 18/60 and 24/48 both run happily on the same belt.
+   *
+   * <p>60/18 = 3.333 is the ORIGINAL pair and is believed to be out of date: the stage was
+   * changed to a smaller reduction, but the new pulley tooth counts were not recorded. Until they
+   * are, this number is wrong in the direction that makes the pivot overshoot.
    */
   private static final double PIVOT_FINAL_STAGE = 60.0 / 18.0;
 
