@@ -242,8 +242,20 @@ public final class Constants
        * <p>Robot left means left while looking forward from behind the robot. An observer standing
        * at the front and looking toward the rear sees +Y on their RIGHT. Verify the physical lens
        * position before changing this sign; a lateral mounting error changes parallax with range.
+       *
+       * <p>8.375 in (8 1/4 + 1/8) tape-measured on the robot 2026-10-23, replacing an estimated
+       * 8.5. Worth knowing how little that refinement buys: this term enters the aim as
+       * {@code atan(error / range)}, so an eighth of an inch is 0.18 deg at 1 m and 0.09 deg at
+       * 2 m -- far below what anyone can see downrange.
+       *
+       * <p>What this term DOES explain is a bias that shrinks with distance, because the whole
+       * 8.375 in correction is worth 12 deg at 1 m, 6 deg at 2 m and 2.5 deg at 5 m. So an aim
+       * error with that shape is this correction landing wrong, not the turret zero -- a wrong
+       * turret zero is a fixed number of degrees at every range. The usual reason it lands wrong
+       * is {@code rangeMeters} being wrong, since the correction is applied at that range, and
+       * range comes from MOUNT_HEIGHT_METERS and MOUNT_PITCH_DEGREES below.
        */
-      public static final double MOUNT_LEFT_METERS = Units.inchesToMeters(8.5);
+      public static final double MOUNT_LEFT_METERS = Units.inchesToMeters(8.375);
 
       /** Lens height above the carpet. */
       public static final double MOUNT_HEIGHT_METERS = Units.inchesToMeters(20.0);
