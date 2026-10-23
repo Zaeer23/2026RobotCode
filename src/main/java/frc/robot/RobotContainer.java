@@ -284,65 +284,20 @@ private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
     // the OUTPOST CHUTE at the start of AUTO, so tell them. "to HP" ones finish by feeding a load
     // through the OUTPOST opening for the HUMAN PLAYER.
     autoCatalog.addPathPlanner(
-        "01 Low Trench - Hold, Neutral x2",
-        "R26 01 Low Trench - Hold, Neutral x2", true);
+        "HP 1 High Trench - Depot, Shoot, Neutral to HP",
+        "R26 HP 1 High Trench - Depot, Shoot, Neutral to HP", true);
     autoCatalog.addPathPlanner(
-        "02 Low Trench - Hold, Neutral, Chute",
-        "R26 02 Low Trench - Hold, Neutral, Chute", false);
+        "HP 2 High Bump - Depot, Shoot, Neutral to HP",
+        "R26 HP 2 High Bump - Depot, Shoot, Neutral to HP", false);
     autoCatalog.addPathPlanner(
-        "03 Low Trench - Hold, Chute, Neutral to HP",
-        "R26 03 Low Trench - Hold, Chute, Neutral to HP", false);
+        "HP 3 Center - Depot, Shoot, Neutral to HP",
+        "R26 HP 3 Center - Depot, Shoot, Neutral to HP", false);
     autoCatalog.addPathPlanner(
-        "04 Low Trench - Hold, Chute, Neutral",
-        "R26 04 Low Trench - Hold, Chute, Neutral", false);
+        "HP 4 High Trench - Straight to Neutral to HP",
+        "R26 HP 4 High Trench - Straight to Neutral to HP", false);
     autoCatalog.addPathPlanner(
-        "05 Low Bump - Hold, Neutral x2",
-        "R26 05 Low Bump - Hold, Neutral x2", false);
-    autoCatalog.addPathPlanner(
-        "06 Low Bump - Hold, Neutral, Chute",
-        "R26 06 Low Bump - Hold, Neutral, Chute", false);
-    autoCatalog.addPathPlanner(
-        "07 Low Bump - Hold, Chute, Neutral",
-        "R26 07 Low Bump - Hold, Chute, Neutral", false);
-    autoCatalog.addPathPlanner(
-        "08 Low Bump - Hold, Chute, Neutral to HP",
-        "R26 08 Low Bump - Hold, Chute, Neutral to HP", false);
-    autoCatalog.addPathPlanner(
-        "09 Center - Preload, Depot, Chute",
-        "R26 09 Center - Preload, Depot, Chute", false);
-    autoCatalog.addPathPlanner(
-        "10 Center - Hold, Chute, Neutral to HP",
-        "R26 10 Center - Hold, Chute, Neutral to HP", false);
-    autoCatalog.addPathPlanner(
-        "11 Center - Hold, Depot, Neutral",
-        "R26 11 Center - Hold, Depot, Neutral", false);
-    autoCatalog.addPathPlanner(
-        "12 Center - Hold, Chute, Neutral",
-        "R26 12 Center - Hold, Chute, Neutral", false);
-    autoCatalog.addPathPlanner(
-        "13 High Bump - Hold, Depot, Neutral",
-        "R26 13 High Bump - Hold, Depot, Neutral", false);
-    autoCatalog.addPathPlanner(
-        "14 High Bump - Hold, Neutral x2",
-        "R26 14 High Bump - Hold, Neutral x2", false);
-    autoCatalog.addPathPlanner(
-        "15 High Bump - Hold, Neutral, Depot to HP",
-        "R26 15 High Bump - Hold, Neutral, Depot to HP", false);
-    autoCatalog.addPathPlanner(
-        "16 High Bump - Hold, Neutral, Depot",
-        "R26 16 High Bump - Hold, Neutral, Depot", false);
-    autoCatalog.addPathPlanner(
-        "17 High Trench - Hold, Neutral x2",
-        "R26 17 High Trench - Hold, Neutral x2", false);
-    autoCatalog.addPathPlanner(
-        "18 High Trench - Hold, Neutral, Depot",
-        "R26 18 High Trench - Hold, Neutral, Depot", false);
-    autoCatalog.addPathPlanner(
-        "19 High Trench - Hold, Depot, Neutral",
-        "R26 19 High Trench - Hold, Depot, Neutral", false);
-    autoCatalog.addPathPlanner(
-        "20 High Trench - Hold, Neutral, Depot to HP",
-        "R26 20 High Trench - Hold, Neutral, Depot to HP", false);
+        "HP 5 Center - Straight to Neutral to HP",
+        "R26 HP 5 Center - Straight to Neutral to HP", false);
     autoCatalog.addInPlace(
         "Blind timed shoot (no vision)",
         new ShootingCommand(m_shooter, m_kicker, m_hopper),

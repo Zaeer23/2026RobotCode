@@ -66,6 +66,13 @@ public class IntakeSubsystem extends SubsystemBase {
    */
   private static final double PIVOT_DOWN_CLEAR_TOLERANCE_DEGREES = 8.0;
 
+  /**
+   * Pivot output below which a manual command does not count as "driving it down".
+   *
+   * <p>Keeps a stick resting slightly off centre from spinning the rollers backwards forever.
+   */
+  private static final double PIVOT_DESCENT_OUTPUT_DEADBAND = 0.05;
+
   // Pivot oscillation is commanded as raw duty cycle, not as a position setpoint. At a 0.18-0.20s
   // period the closed-loop controller never reaches either endpoint before the target flips, so it
   // only ever integrates against itself; driving the motor open-loop actually produces the shake.
@@ -216,16 +223,39 @@ public class IntakeSubsystem extends SubsystemBase {
     }, this).ignoringDisable(true).withName("Intake.DISABLED");
   }
 
+  /**
+   * Driver control of the pivot, with the rollers clearing the way on the way down.
+   *
+   * <p>Whenever the commanded output is downward the rollers run backward. The pivot has to get
+   * past the hood, and FUEL sitting in the throat jams against that lip and makes it very hard to
+   * push down. Reversing empties the throat so the pivot drops through under its own command
+   * instead of fighting a wedged ball.
+   *
+   * <p>Only while descending. Reversing on the way up would throw away whatever was collected,
+   * and holding position is not a direction, so a stationary stick leaves the rollers alone.
+   */
   public Command manualPivot(DoubleSupplier pSupplier) {
     return Commands.run(() -> {
         double input = pSupplier.getAsDouble();
         double squared = Math.copySign(input * input, input);
-        pivotMotor.set(squared * 0.5); // cap at 50% to reduce aggression
+        double output = squared * 0.5; // cap at 50% to reduce aggression
+        pivotMotor.set(output);
+        smc.setDutyCycle(output < -PIVOT_DESCENT_OUTPUT_DEADBAND ? -INTAKE_SPEED : 0.0);
     }, this)
-        .finallyDo(() -> pivotMotor.set(0))
+        .finallyDo(() -> {
+          pivotMotor.set(0);
+          smc.setDutyCycle(0);
+        })
         .withName("IntakePivot.Manual");
 }
 
+  /**
+   * Two-position pivot on a stick, with the same descent assist as {@link #manualPivot}.
+   *
+   * <p>Here "descending" is whether the pivot is still above the target it was sent to, rather
+   * than which way the stick is pushed: the stick only picks a target and then the controller
+   * drives to it, so the stick is usually back at centre while the pivot is still travelling.
+   */
   public Command joystickPivotTwoPosition(DoubleSupplier pSupplier) {
     return Commands.run(() -> {
       double input = pSupplier.getAsDouble();
@@ -235,7 +265,26 @@ public class IntakeSubsystem extends SubsystemBase {
         joystickPivotTargetDegrees = PIVOT_STOW_DEGREES;
       }
       intakePivotController.setPosition(Degrees.of(joystickPivotTargetDegrees));
-    }, this).withName("IntakePivot.JoystickTwoPosition");
+
+      boolean headingDown = joystickPivotTargetDegrees <= PIVOT_MIN_DEGREES + 1.0;
+      boolean stillAbove = intakePivot.getAngle().in(Degrees)
+          > joystickPivotTargetDegrees + PIVOT_DOWN_CLEAR_TOLERANCE_DEGREES;
+      smc.setDutyCycle(headingDown && stillAbove ? -INTAKE_SPEED : 0.0);
+    }, this)
+        .finallyDo(() -> smc.setDutyCycle(0))
+        .withName("IntakePivot.JoystickTwoPosition");
+  }
+
+  /**
+   * Holds the pivot still at the deployed angle while FUEL is fed through the intake.
+   *
+   * <p>The counterpart to pivotBounceWhileFeedingCommand, which belongs to the shot. This is the
+   * grab-and-keep feed: shaking here throws collected FUEL back out, which is the opposite of
+   * what the operator is holding the button for.
+   */
+  public Command holdForFeedCommand() {
+    return run(() -> intakePivotController.setPosition(Degrees.of(PIVOT_DEPLOY_DEGREES)))
+        .withName("IntakePivot.HoldForFeed");
   }
 
   public Command pivotBounceWhileFeedingCommand() {

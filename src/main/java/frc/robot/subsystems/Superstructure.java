@@ -355,8 +355,14 @@ public Command manualTurretControl(Supplier<Double> speedSupplier) {
     // The pivot must be clear of the ball's path BEFORE anything feeds. Raising it in parallel
     // with the spin-up costs no time, because the flywheel takes longer to reach speed than the
     // pivot takes to lift.
+    // Raise clear of the ball's path, then shake once it is up there. The shake is what knocks
+    // FUEL loose into the kicker, and it belongs HERE, to the shot, and nowhere else. It had ended
+    // up on feedAllCommand instead, which is the operator's grab-and-keep feed: bouncing while
+    // collecting is how FUEL gets thrown back out, and meanwhile the shot itself never shook at
+    // all.
     Command raisePivot = Constants.IntakeConstants.ENABLED
-        ? intake.raiseForShotCommand()
+        ? intake.raiseForShotCommand().until(intake::isClearOfShot)
+            .andThen(intake.pivotBounceWhileFeedingCommand())
         : Commands.none();
 
     Command fire = new FeedWhenReadyCommand(
@@ -385,7 +391,7 @@ public Command manualTurretControl(Supplier<Double> speedSupplier) {
     return Commands.parallel(
         hopper.feedCommand().asProxy(),
         kicker.feedCommand().asProxy(),
-        intake.pivotBounceWhileFeedingCommand().asProxy()).withName("Superstructure.feedAll");
+        intake.holdForFeedCommand().asProxy()).withName("Superstructure.feedAll");
     // intake.setPivotAngle(Degrees.of(46)).asProxy()).withName("Superstructure.feedAll");
   }
 

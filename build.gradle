@@ -203,3 +203,13 @@ task dashboardBundle(type: Copy) {
     from(tasks.dashboardJar) { into '.' }
     from("$buildDir/jni/release") { into 'natives' }
 }
+
+// Regenerates the REBUILT autonomous routines. Replaces tools/generate_rebuilt_autos.py, which
+// cannot run here: the only python on this machine is the Microsoft Store stub.
+task generateAutos(type: JavaExec) {
+    group = 'robot'
+    description = 'Regenerate the PathPlanner autos and paths, then run ./gradlew test.'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'frc.robot.auto.RebuiltAutoGenerator'
+    args projectDir.toString()
+}

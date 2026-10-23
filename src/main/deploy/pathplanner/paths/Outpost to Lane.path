@@ -1,0 +1,69 @@
+{
+  "version" : "2025.0",
+  "waypoints" : [ {
+    "anchor" : {
+      "x" : 0.5,
+      "y" : 0.666
+    },
+    "prevControl" : null,
+    "nextControl" : {
+      "x" : 1.1491,
+      "y" : 0.666
+    },
+    "isLocked" : false,
+    "linkedName" : null
+  }, {
+    "anchor" : {
+      "x" : 2.2,
+      "y" : 0.834
+    },
+    "prevControl" : {
+      "x" : 1.5509,
+      "y" : 0.834
+    },
+    "nextControl" : {
+      "x" : 2.713,
+      "y" : 0.834
+    },
+    "isLocked" : false,
+    "linkedName" : null
+  }, {
+    "anchor" : {
+      "x" : 3.55,
+      "y" : 0.834
+    },
+    "prevControl" : {
+      "x" : 3.037,
+      "y" : 0.834
+    },
+    "nextControl" : null,
+    "isLocked" : false,
+    "linkedName" : null
+  } ],
+  "rotationTargets" : [ {
+    "waypointRelativePos" : 1,
+    "rotationDegrees" : 180.0
+  } ],
+  "constraintZones" : [ ],
+  "pointTowardsZones" : [ ],
+  "eventMarkers" : [ ],
+  "globalConstraints" : {
+    "maxVelocity" : 4.2,
+    "maxAcceleration" : 3.2,
+    "maxAngularVelocity" : 540.0,
+    "maxAngularAcceleration" : 1000.0,
+    "nominalVoltage" : 12.0,
+    "unlimited" : false
+  },
+  "goalEndState" : {
+    "velocity" : 0,
+    "rotation" : 0.0
+  },
+  "reversed" : false,
+  "folder" : "Rebuilt HP",
+  "idealStartingState" : {
+    "velocity" : 0,
+    "rotation" : 180.0
+  },
+  "useDefaultConstraints" : false
+}
