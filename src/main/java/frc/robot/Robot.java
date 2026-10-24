@@ -143,13 +143,21 @@ public class Robot extends TimedRobot
   {
     m_robotContainer.setMotorBrake(true);
     m_robotContainer.applySelectedStartPose();
+    m_robotContainer.reportAutoHealth();
     m_autonomousCommand = m_robotContainer.getAutonomousCommand();
 
-    // schedule the autonomous command (example)
-    if (m_autonomousCommand != null)
+    // Say what is about to run, and say so loudly when nothing is. "The auto did not fire" is
+    // otherwise indistinguishable from "the auto ran and did nothing", and they have completely
+    // different causes.
+    if (m_autonomousCommand == null)
     {
-      m_autonomousCommand.schedule();
+      DriverStation.reportError(
+          "[AUTO] Nothing selected. The chooser returned null, so AUTO will do nothing.", false);
+      return;
     }
+
+    System.out.println("[AUTO] Running: " + m_autonomousCommand.getName());
+    m_autonomousCommand.schedule();
   }
 
   /**
