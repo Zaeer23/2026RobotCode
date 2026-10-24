@@ -64,6 +64,7 @@ public class DashboardApp {
   private NetworkTable dash;
   private NetworkTable controls;
   private NetworkTable autoChooser;
+  private final PsychoOverlay psychoOverlay = new PsychoOverlay();
 
   private final MusicPlayer player = new MusicPlayer();
 
@@ -173,6 +174,10 @@ public class DashboardApp {
     Rectangle screen = GraphicsEnvironment.getLocalGraphicsEnvironment().getMaximumWindowBounds();
     frame.setSize(Math.min(1480, screen.width), Math.min(920, screen.height));
     frame.setLocationRelativeTo(null);
+    // Glass pane so CYBERPSYCHO paints over everything without taking any clicks.
+    frame.setGlassPane(psychoOverlay);
+    psychoOverlay.setVisible(false);
+
     frame.setVisible(true);
   }
 
@@ -440,6 +445,7 @@ public class DashboardApp {
     String robotIp = connections.length > 0 ? connections[0].remote_ip : null;
 
     boolean enabled = dash.getEntry("Enabled").getBoolean(false);
+    psychoOverlay.setActive(dash.getEntry("CyberPsycho/Active").getBoolean(false));
     String alliance = dash.getEntry("Alliance").getString("");
     String activeAuto = autoChooser.getEntry("active").getString("");
 

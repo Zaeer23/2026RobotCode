@@ -116,6 +116,11 @@ public class ShooterSubsystem extends SubsystemBase {
     return setSpeed(RPM.of(ShooterConstants.REFERENCE_RPM));
   }
 
+  /** Hard stop that needs no command, for when the scheduler is being emptied out. */
+  public void stopNowForCyberPsycho() {
+    stopNow();
+  }
+
   private void stopNow() {
     commandedShotRpm = 0.0;
     requestedSpeedReachable = false;

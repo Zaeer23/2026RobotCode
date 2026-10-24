@@ -296,6 +296,11 @@ public class Limelight extends SubsystemBase {
 
   /** Keeps the camera in AprilTag mode so detection cannot be switched off behind our back. */
   private void enforcePipeline() {
+    // Once the camera is a plain video feed, holding it on a tag pipeline every loop would drag
+    // it back out of driver mode.
+    if (inDriverCameraMode) {
+      return;
+    }
     int wanted = wantedPipeline;
     if (wanted >= 0 && connected) {
       pipelineEntry.setNumber(wanted);
@@ -337,6 +342,27 @@ public class Limelight extends SubsystemBase {
         .ignoringDisable(true)
         .withName("Limelight.toggleBrightField");
   }
+
+  /**
+   * Turns the camera into a plain video feed, or back into a tag reader.
+   *
+   * <p>Sets camMode, the Limelight's own driver-camera switch: it stops processing targets and
+   * opens the exposure back up for a human looking at the picture. The tag pipeline underneath is
+   * left alone, so this is reversible even though nothing currently reverses it.
+   *
+   * <p>Losing the tag reading is the point rather than a side effect. In CYBERPSYCHO nothing is
+   * aiming at anything, and a driver going flat out wants a picture, not a tag list.
+   */
+  public void setDriverCameraMode(boolean driverCam) {
+    if (driverCam == inDriverCameraMode) {
+      return;
+    }
+    inDriverCameraMode = driverCam;
+    table.getEntry("camMode").setNumber(driverCam ? 1 : 0);
+    System.out.println("[LIMELIGHT] camMode -> " + (driverCam ? "DRIVER (plain video)" : "VISION"));
+  }
+
+  private boolean inDriverCameraMode = false;
 
   /** Which pipeline this class is holding the camera on. */
   public int getWantedPipeline() {

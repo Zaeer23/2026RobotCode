@@ -666,6 +666,37 @@ private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
     drivebase.setMotorBrake(brake);
   }
 
+  /**
+   * Watches for the CYBERPSYCHO sequence and holds the robot in it once entered.
+   *
+   * <p>Called every loop from robotPeriodic, so it is live in every mode. The release has to be
+   * repeated rather than done once at the latch: default commands are re-scheduled the moment a
+   * subsystem is free, so a single cancel would be undone on the very next loop.
+   */
+  public void updateCyberPsycho()
+  {
+    CyberPsycho.update(driverXbox.pov(), shooterXbox.pov());
+
+    if (!CyberPsycho.isActive()) {
+      return;
+    }
+
+    // Mechanisms are released, not driven. Dropping the default commands is what keeps them from
+    // being handed straight back, and nothing new is ever scheduled onto them.
+    for (edu.wpi.first.wpilibj2.command.Subsystem mechanism :
+        new edu.wpi.first.wpilibj2.command.Subsystem[] {
+            m_shooter, m_turret, m_intake, m_hopper, m_kicker }) {
+      edu.wpi.first.wpilibj2.command.CommandScheduler.getInstance().removeDefaultCommand(mechanism);
+      Command running = edu.wpi.first.wpilibj2.command.CommandScheduler.getInstance().requiring(mechanism);
+      if (running != null) {
+        running.cancel();
+      }
+    }
+
+    m_shooter.stopNowForCyberPsycho();
+    m_camera.setDriverCameraMode(true);
+  }
+
   public void updateShuffleboard()
   {
     m_shuffleboard.update();
@@ -707,7 +738,12 @@ private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
   {
     double maxLinearSpeed = drivebase.getSwerveDrive().getMaximumChassisVelocity();
     double maxAngularSpeed = drivebase.getSwerveDrive().getMaximumChassisAngularVelocity();
-    double selectedLinearSpeed = Math.min(m_shuffleboard.getSelectedDriveSpeedMetersPerSecond(), maxLinearSpeed);
+
+    // CYBERPSYCHO: the dashboard's speed selector stops applying. The driver gets the whole
+    // chassis velocity the modules can produce, with no scaling in between.
+    double selectedLinearSpeed = CyberPsycho.isActive()
+        ? maxLinearSpeed
+        : Math.min(m_shuffleboard.getSelectedDriveSpeedMetersPerSecond(), maxLinearSpeed);
     double driveScale = maxLinearSpeed > 0.0 ? selectedLinearSpeed / maxLinearSpeed : 0.0;
 
     double forward = -driverXbox.getLeftY() * driveScale * maxLinearSpeed;
