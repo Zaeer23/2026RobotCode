@@ -92,6 +92,18 @@ public class Limelight extends SubsystemBase {
 
   private TargetFilter filter = TargetFilter.ANY_TAG;
 
+  /**
+   * Every tag id this camera has reported since boot, and every id it reported that is not on
+   * the 2026 field.
+   *
+   * <p>Kept because the two most likely ways a camera is "wrong for 2026" both look identical
+   * from the robot: no targets. Either the pipeline is filtering ids to a previous season, in
+   * which case the high tags simply never arrive, or it is on the wrong tag family, in which
+   * case nothing arrives. Listing what DID arrive separates them.
+   */
+  private final java.util.Set<Integer> seenTagIds = new java.util.TreeSet<>();
+  private final java.util.Set<Integer> rejectedTagIds = new java.util.TreeSet<>();
+
   private List<VisionTarget> visibleTargets = List.of();
   private Optional<VisionTarget> lockedTarget = Optional.empty();
   private int goodFrames = 0;
@@ -160,9 +172,54 @@ public class Limelight extends SubsystemBase {
    * is a real hub, at a real HUB mounting height, so the ranging is correct for both.
    */
   public Optional<VisionTarget> getHubTarget() {
+    // Nearest wins when several hub tags are in view, which is the normal case: the hub carries
+    // eight and a shooting position usually sees two or three of them.
+    //
+    // Stated as an explicit min rather than relying on visibleTargets already being sorted by
+    // range. It is, but that is done a hundred lines away, and a findFirst() that silently means
+    // "closest" only by coincidence of ordering is the kind of thing that breaks quietly when
+    // someone changes the sort.
     return visibleTargets.stream()
         .filter(target -> FieldTags.functionOf(target.id).isScoringTarget())
-        .findFirst();
+        .min(java.util.Comparator.comparingDouble(target -> target.rangeMeters));
+  }
+
+  /**
+   * Prints which tag ids this camera has actually produced, and which it produced that are not
+   * on the 2026 field.
+   *
+   * <p>"The tags are wrong for this season" looks identical from the robot to "the camera sees
+   * nothing", because an id that is not on the field is dropped before anything downstream hears
+   * about it. This separates the cases:
+   *
+   * <ul>
+   *   <li><b>Nothing at all</b> — the pipeline is not an AprilTag pipeline, or it is on the wrong
+   *       family. 2026 is 36h11.</li>
+   *   <li><b>Only low ids, never above 22</b> — the pipeline is filtering ids to last season's
+   *       range. 2026 runs 1 to 32, and the blue hub needs 18 to 27.</li>
+   *   <li><b>Ids listed as rejected</b> — the camera is reporting tags that do not exist on this
+   *       field at all.</li>
+   * </ul>
+   */
+  public void reportTagIdCoverage() {
+    System.out.println("  tag ids seen since boot: "
+        + (seenTagIds.isEmpty() ? "NONE" : seenTagIds.toString()));
+
+    if (!rejectedTagIds.isEmpty()) {
+      System.out.println("  REJECTED ids not on the 2026 field: " + rejectedTagIds);
+      System.out.println("    The pipeline is reporting tags from another field map.");
+    }
+    if (seenTagIds.isEmpty()) {
+      System.out.println("    No valid tag has ever arrived. Check the pipeline is AprilTag type");
+      System.out.println("    and family 36h11, and that the id filter is not set.");
+    } else {
+      int highest = java.util.Collections.max(seenTagIds);
+      if (highest <= 22) {
+        System.out.println("    Nothing above id 22 has ever been seen. 2026 uses 1-32 and the");
+        System.out.println("    BLUE hub is 18-27, so a filter stuck on last season's range");
+        System.out.println("    would look exactly like this.");
+      }
+    }
   }
 
   /** True when an actual HUB tag is in view, as opposed to any tag at all. */
@@ -261,8 +318,12 @@ public class Limelight extends SubsystemBase {
       double area = raw[i + I_TA];
 
       if (!FieldTags.isFieldTag(id)) {
+        // Dropping these silently is how "the camera sees nothing" hides a camera that is seeing
+        // plenty, just not tags from this field. Record them so the diagnostics can say so.
+        rejectedTagIds.add(id);
         continue;
       }
+      seenTagIds.add(id);
       if (!finite(tx) || !finite(ty) || Math.abs(tx) > MAX_ANGLE_DEGREES
           || Math.abs(ty) > MAX_ANGLE_DEGREES) {
         continue;
@@ -482,6 +543,7 @@ public class Limelight extends SubsystemBase {
   /** Dumps every key the camera publishes. The definitive "what pipeline is this" check. */
   public void dumpDiagnostics() {
     System.out.println("=== LIMELIGHT '" + name + "' DUMP ===");
+    reportTagIdCoverage();
     Set<String> keys = table.getKeys();
     if (keys.isEmpty()) {
       System.out.println("  NT table '" + table.getPath() + "' has NO keys.");
