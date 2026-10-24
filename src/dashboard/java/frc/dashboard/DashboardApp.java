@@ -258,9 +258,15 @@ public class DashboardApp {
     views.setBorder(null);
     views.setOpaque(false);
     views.setContinuousLayout(true);
+    // Both of these want the bottom, and BorderLayout only keeps one component per region -- the
+    // last one added silently replaces the first. Stack them instead.
+    JPanel bottom = new JPanel(new BorderLayout(0, Theme.GAP));
+    bottom.setOpaque(false);
+    bottom.add(buildTiles(), BorderLayout.NORTH);
+    bottom.add(psychoCard, BorderLayout.SOUTH);
+
     root.add(views, BorderLayout.CENTER);
-    root.add(psychoCard, BorderLayout.SOUTH);
-    root.add(buildTiles(), BorderLayout.SOUTH);
+    root.add(bottom, BorderLayout.SOUTH);
     return root;
   }
 
