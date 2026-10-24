@@ -8,6 +8,10 @@ import static edu.wpi.first.units.Units.Meter;
 
 import edu.wpi.first.math.geometry.Translation2d;
 import com.ctre.phoenix6.hardware.CANcoder;
+import com.revrobotics.PersistMode;
+import com.revrobotics.ResetMode;
+import com.revrobotics.spark.SparkMax;
+import com.revrobotics.spark.config.SparkMaxConfig;
 import com.pathplanner.lib.auto.AutoBuilder;
 import com.pathplanner.lib.commands.PathPlannerAuto;
 import com.pathplanner.lib.commands.PathfindingCommand;
@@ -47,6 +51,7 @@ import org.photonvision.targeting.PhotonPipelineResult;
 import swervelib.SwerveController;
 import swervelib.SwerveDrive;
 import swervelib.SwerveDriveTest;
+import swervelib.SwerveModule;
 import swervelib.math.SwerveMath;
 import swervelib.parser.SwerveControllerConfiguration;
 import swervelib.parser.SwerveDriveConfiguration;
@@ -556,6 +561,41 @@ public class SwerveSubsystem extends SubsystemBase
   public void drive(ChassisSpeeds velocity)
   {
     swerveDrive.drive(velocity);
+  }
+
+  /**
+   * CyberPsycho: hands the drive everything the motors have. One way; nothing puts it back.
+   *
+   * <p>The speed cap goes from {@link Constants#MAX_SPEED} to the drive motors' free speed through
+   * the configured gearing, which is the fastest a module can be commanded at all, and the turn
+   * rate rises to match it at the drive base radius. Both the allowable and the attainable limits
+   * move, because YAGSL drives at the lower of the two.
+   *
+   * <p>Each drive motor's current limit goes up to {@code driveCurrentAmps}. Written straight to
+   * the SparkMax rather than through YAGSL, whose setCurrentLimit only edits a cached config and
+   * then needs a blocking apply it warns about while enabled. configureAsync does not stall the
+   * loop, and it is not persisted, so a power cycle puts the JSON's limit back.
+   *
+   * @return the new top speed, metres per second
+   */
+  public double unleash(int driveCurrentAmps)
+  {
+    double topSpeed = swerveDrive.getMaximumModuleDriveVelocity();
+    double topTurn = topSpeed / swerveDrive.swerveDriveConfiguration.getDriveBaseRadiusMeters();
+    swerveDrive.setMaximumAllowableSpeeds(topSpeed, topTurn);
+    swerveDrive.setMaximumAttainableSpeeds(topSpeed, topTurn);
+
+    SparkMaxConfig current = new SparkMaxConfig();
+    current.smartCurrentLimit(driveCurrentAmps);
+    for (SwerveModule module : swerveDrive.getModules())
+    {
+      if (module.getDriveMotor().getMotor() instanceof SparkMax spark)
+      {
+        spark.configureAsync(current, ResetMode.kNoResetSafeParameters,
+                             PersistMode.kNoPersistParameters);
+      }
+    }
+    return topSpeed;
   }
 
 

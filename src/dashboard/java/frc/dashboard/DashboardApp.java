@@ -70,6 +70,11 @@ public class DashboardApp {
   private HeaderBar header;
   private AutoTab autoTab;
 
+  /** Draws over the whole window once the robot reports CyberPsycho. */
+  private CyberPsychoOverlay cyberPsycho;
+  private JFrame frame;
+  private String frameTitle;
+
   // Match tab.
   private FieldView fieldView;
   private CameraView cameraView;
@@ -140,7 +145,8 @@ public class DashboardApp {
     controls = nt.getTable("Controls");
     autoChooser = nt.getTable("SmartDashboard").getSubTable(AUTO_CHOOSER);
 
-    JFrame frame = new JFrame("Team " + team + "  ·  Driver Dashboard");
+    frameTitle = "Team " + team + "  ·  Driver Dashboard";
+    frame = new JFrame(frameTitle);
     frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
     frame.setIconImages(HeaderBar.Badge.windowIcons(team));
     frame.setMinimumSize(new Dimension(1100, 680));
@@ -158,6 +164,10 @@ public class DashboardApp {
     tabs.addTab("Music", Icons.music(16, Theme.TEXT_DIM), new MusicTab(player));
     tabs.putClientProperty(FlatClientProperties.TABBED_PANE_TRAILING_COMPONENT, buildTabTrailer());
     frame.add(tabs, BorderLayout.CENTER);
+
+    cyberPsycho = new CyberPsychoOverlay();
+    cyberPsycho.placeBannerBelow(header);
+    frame.setGlassPane(cyberPsycho);
 
     // One timer drives every refresh. Fast enough to feel live, slow enough to stay cheap.
     loadOfflineField();
@@ -443,12 +453,24 @@ public class DashboardApp {
     String alliance = dash.getEntry("Alliance").getString("");
     String activeAuto = autoChooser.getEntry("active").getString("");
 
+    // Follow the robot while connected; across a dropped connection, keep what it last said
+    // rather than calming down because the radio blinked.
+    boolean wasCyberPsycho = cyberPsycho.isActive();
+    cyberPsycho.update(connected
+        ? dash.getEntry("CyberPsycho/Active").getBoolean(false)
+        : wasCyberPsycho);
+    if (cyberPsycho.isActive() != wasCyberPsycho) {
+      frame.setTitle(cyberPsycho.isActive() ? frameTitle + "  ·  CYBERPSYCHO" : frameTitle);
+    }
+
     header.update(
         connected,
         robotIp,
         enabled,
-        dash.getEntry("Mode").getString(
-            dash.getEntry("Autonomous").getBoolean(false) ? "AUTO" : "TELEOP"),
+        cyberPsycho.isActive()
+            ? "CYBERPSYCHO"
+            : dash.getEntry("Mode").getString(
+                dash.getEntry("Autonomous").getBoolean(false) ? "AUTO" : "TELEOP"),
         alliance,
         dash.getEntry("FMSAttached").getBoolean(false),
         activeAuto,

@@ -78,6 +78,11 @@ dependencies {
 test {
     useJUnitPlatform()
     systemProperty 'junit.jupiter.extensions.autodetection.enabled', 'true'
+    // A fresh JVM per test class. Tests that boot the whole RobotContainer open every motor
+    // controller's CAN id, REVLib refuses to open an id twice in one process, and nothing closes
+    // them again -- so sharing a JVM made any later test that builds a subsystem fail on whichever
+    // class happened to run first.
+    forkEvery = 1
 }
 
 // Simulation configuration (e.g. environment variables).

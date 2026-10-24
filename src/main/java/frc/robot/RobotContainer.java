@@ -30,6 +30,7 @@ import frc.robot.controls.ControlProfile.Action;
 import frc.robot.controls.RemappableController;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import frc.robot.commands.ShootingCommand;
+import frc.robot.cyberpsycho.CyberPsycho;
 import frc.robot.subsystems.HopperSubsystem;
 import frc.robot.subsystems.IntakeSubsystem;
 import frc.robot.vision.Limelight;
@@ -164,6 +165,14 @@ private final ShuffleboardManager m_shuffleboard = new ShuffleboardManager(
 private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
     m_superstructure, m_shooter, m_turret, drivebase, m_camera, m_controls
 );
+
+  /**
+   * The one-way all-power-to-the-wheels mode, entered with UP UP DOWN DOWN LEFT RIGHT LEFT RIGHT
+   * on either D-pad. Polled from {@link #runCyberPsycho()}, before the scheduler.
+   */
+  private final CyberPsycho m_cyberPsycho = new CyberPsycho(
+      drivebase, m_camera, m_shooter, m_turret, m_intake, m_hopper, m_kicker,
+      driverXbox, shooterXbox);
 
   /** The auto chooser, plus the field preview of each routine the dashboard draws. */
   private final AutoCatalog autoCatalog = new AutoCatalog(this::loadAuto);
@@ -639,7 +648,27 @@ private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
    */
   public Command getAutonomousCommand()
   {
+    // Every routine uses a mechanism, and the CyberPsycho lockout refuses anything that does, so
+    // the selected one would be dropped by the scheduler without a word. Say so instead.
+    if (m_cyberPsycho.isActive())
+    {
+      DriverStation.reportWarning(
+          "[AUTO] CyberPsycho is active, so no routine runs: every one needs a mechanism and the"
+              + " mechanisms are locked out. The robot sits AUTO out.", false);
+      return Commands.none().withName("CyberPsycho (no auto)");
+    }
     return autoCatalog.getSelected();
+  }
+
+  /**
+   * Watches both D-pads for the CyberPsycho code, and keeps its lockout in place once it is on.
+   *
+   * <p>Call from robotPeriodic BEFORE the command scheduler runs, so the lockout is already
+   * holding the mechanisms when the scheduler polls this loop's buttons.
+   */
+  public void runCyberPsycho()
+  {
+    m_cyberPsycho.periodic();
   }
 
   public void setMotorBrake(boolean brake)
@@ -688,7 +717,10 @@ private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
   {
     double maxLinearSpeed = drivebase.getSwerveDrive().getMaximumChassisVelocity();
     double maxAngularSpeed = drivebase.getSwerveDrive().getMaximumChassisAngularVelocity();
-    double selectedLinearSpeed = Math.min(m_shuffleboard.getSelectedDriveSpeedMetersPerSecond(), maxLinearSpeed);
+    // CyberPsycho ignores the dashboard's speed setting: full stick is everything the drive has.
+    double selectedLinearSpeed = m_cyberPsycho.isActive()
+        ? maxLinearSpeed
+        : Math.min(m_shuffleboard.getSelectedDriveSpeedMetersPerSecond(), maxLinearSpeed);
     double driveScale = maxLinearSpeed > 0.0 ? selectedLinearSpeed / maxLinearSpeed : 0.0;
 
     double forward = -driverXbox.getLeftY() * driveScale * maxLinearSpeed;

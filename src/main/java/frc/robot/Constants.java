@@ -261,6 +261,17 @@ public final class Constants
        */
       public static final int BRIGHT_FIELD_PIPELINE = -1;
 
+      /**
+       * The pipeline CyberPsycho switches to: a plain driver camera with no processing, or -1 to
+       * leave the pipeline alone and only stop reading tags.
+       *
+       * <p>Set this slot up in the web UI as a Viewfinder pipeline (no targeting), with exposure
+       * up so it is a usable driving view. It is only ever selected by CyberPsycho, so normal
+       * boots never touch it. If the slot is left unconfigured the robot still ignores tag data
+       * once the mode is on; the stream just keeps looking like a tag tracker.
+       */
+      public static final int DRIVER_CAMERA_PIPELINE = 9;
+
       // ---- Mounting pose (MEASURE THESE ON THE REAL ROBOT) -------------------
       // Lens position in the robot frame: +X forward, +Y left, +Z up. The camera is bolted to the
       // CHASSIS, so it does not rotate with the turret and tx is NOT turret error.

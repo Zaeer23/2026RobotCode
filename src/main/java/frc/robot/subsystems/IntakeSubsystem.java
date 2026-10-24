@@ -257,10 +257,13 @@ public class IntakeSubsystem extends SubsystemBase {
    * ended — the opposite of disabled.
    */
   public Command disabledCommand() {
-    return Commands.run(() -> {
-      pivotMotor.set(0);
-      rollerMotor.set(0);
-    }, this).ignoringDisable(true).withName("Intake.DISABLED");
+    return Commands.run(this::cutPower, this).ignoringDisable(true).withName("Intake.DISABLED");
+  }
+
+  /** Pivot and roller both to zero right now, for a caller that already owns this subsystem. */
+  public void cutPower() {
+    pivotMotor.set(0);
+    rollerMotor.set(0);
   }
 
   /**

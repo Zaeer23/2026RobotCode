@@ -107,6 +107,9 @@ public class Limelight extends SubsystemBase {
   /** Pipeline this class holds the camera on. Starts at the normal AprilTag one. */
   private int wantedPipeline = LimeLightConstants.APRILTAG_PIPELINE;
 
+  /** CyberPsycho: a plain driver camera from here on, with tag data ignored. Never cleared. */
+  private boolean cameraOnly = false;
+
   private List<VisionTarget> visibleTargets = List.of();
   private Optional<VisionTarget> lockedTarget = Optional.empty();
   private int goodFrames = 0;
@@ -266,7 +269,7 @@ public class Limelight extends SubsystemBase {
 
     updateConnection(now);
     enforcePipeline();
-    visibleTargets = connected ? readTargets() : List.of();
+    visibleTargets = connected && !cameraOnly ? readTargets() : List.of();
     updateLock();
     updateStatus();
     publish();
@@ -317,6 +320,10 @@ public class Limelight extends SubsystemBase {
    * camera rather than a struggling one.
    */
   public void setBrightFieldPipeline(boolean bright) {
+    if (cameraOnly) {
+      System.out.println("[LIMELIGHT] Camera only (CyberPsycho); not switching pipelines.");
+      return;
+    }
     int wanted = bright
         ? LimeLightConstants.BRIGHT_FIELD_PIPELINE
         : LimeLightConstants.APRILTAG_PIPELINE;
@@ -328,6 +335,39 @@ public class Limelight extends SubsystemBase {
     wantedPipeline = wanted;
     System.out.println("[LIMELIGHT] Pipeline -> " + wanted
         + (bright ? " (bright field)" : " (normal)"));
+  }
+
+  /**
+   * CyberPsycho: turns the Limelight into a plain camera for the rest of the match.
+   *
+   * <p>Two halves. The camera is switched to {@link LimeLightConstants#DRIVER_CAMERA_PIPELINE}, a
+   * no-processing viewfinder set up in the web UI, so the stream is a driving view rather than a
+   * tag tracker; {@link #enforcePipeline} holds it there, so a camera that reboots comes back to
+   * it. And this class stops reading tags at all, so nothing downstream gets a target even if
+   * that pipeline was never set up and the camera is still detecting.
+   *
+   * <p>The current Limelight NetworkTables API has no driver-camera switch of its own (the old
+   * camMode key is gone), which is why this goes through a pipeline.
+   */
+  public void setCameraOnly() {
+    if (cameraOnly) {
+      return;
+    }
+    cameraOnly = true;
+    lockedTarget = Optional.empty();
+    goodFrames = 0;
+    if (LimeLightConstants.DRIVER_CAMERA_PIPELINE >= 0) {
+      wantedPipeline = LimeLightConstants.DRIVER_CAMERA_PIPELINE;
+    }
+    System.out.println("[LIMELIGHT] Camera only: tag reading off"
+        + (LimeLightConstants.DRIVER_CAMERA_PIPELINE >= 0
+            ? ", pipeline -> " + LimeLightConstants.DRIVER_CAMERA_PIPELINE + " (driver camera)."
+            : "; no DRIVER_CAMERA_PIPELINE set, so the camera stays on its current pipeline."));
+  }
+
+  /** True once {@link #setCameraOnly} has run. */
+  public boolean isCameraOnly() {
+    return cameraOnly;
   }
 
   /** Flips between the normal and bright-field pipelines. */
@@ -435,6 +475,11 @@ public class Limelight extends SubsystemBase {
 
   /** Debounced acquire and drop, so one odd frame cannot move a mechanism. */
   private void updateLock() {
+    if (cameraOnly) {
+      lockedTarget = Optional.empty();
+      goodFrames = 0;
+      return;
+    }
     Optional<VisionTarget> candidate = pickEligible();
 
     if (candidate.isPresent()) {
@@ -467,6 +512,8 @@ public class Limelight extends SubsystemBase {
   private void updateStatus() {
     if (!connected) {
       status = "DISCONNECTED";
+    } else if (cameraOnly) {
+      status = "CAMERA ONLY";
     } else if (visibleTargets.isEmpty()) {
       status = "CONNECTED, NO TAGS";
     } else if (lockedTarget.isEmpty()) {
@@ -551,6 +598,11 @@ public class Limelight extends SubsystemBase {
               name,
               describeClients()),
           false);
+      return;
+    }
+
+    // No tags is the point of camera-only mode, not a fault to diagnose.
+    if (cameraOnly) {
       return;
     }
 

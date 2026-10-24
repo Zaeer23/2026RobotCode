@@ -126,6 +126,11 @@ public class ShooterSubsystem extends SubsystemBase {
     return runOnce(this::stopNow).withName("Shooter.stop");
   }
 
+  /** Zero output right now, for a caller that already owns this subsystem. */
+  public void cutPower() {
+    stopNow();
+  }
+
   public Command idleCommand() {
     return run(this::stopNow).withName("Shooter.IDLE");
   }

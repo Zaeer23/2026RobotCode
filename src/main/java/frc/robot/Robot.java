@@ -102,6 +102,9 @@ public class Robot extends TimedRobot
   public void robotPeriodic()
   {
     robotHealth.update();
+    // Before the scheduler, so a CyberPsycho lockout is in place before this loop's buttons are
+    // polled. See CyberPsycho.periodic().
+    m_robotContainer.runCyberPsycho();
     // Runs the Scheduler.  This is responsible for polling buttons, adding newly-scheduled
     // commands, running already-scheduled commands, removing finished or interrupted commands,
     // and running subsystem periodic() methods.  This must be called from the robot's periodic
