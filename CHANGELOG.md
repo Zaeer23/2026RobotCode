@@ -3,9 +3,10 @@
 ## 2026-10-24
 
 - CyberPsycho mode: UP UP DOWN DOWN LEFT RIGHT LEFT RIGHT on either D-pad. Locks out every
-  mechanism, raises the drive to the motors' free speed with a 60 A current limit, turns the
-  Limelight into a plain camera, and sends the dashboard haywire. One way: only restarting the
-  robot program ends it. See docs/robot-tuning.md
+  mechanism, takes every limit off the drive NEOs (speed cap to their 13 V free speed, 80 A,
+  no voltage compensation, no ramp), turns the Limelight into a plain camera, and sends the
+  dashboard haywire. One way: only restarting the robot program ends it. See
+  docs/robot-tuning.md
 - Tests run one JVM per test class, so a test that boots the whole robot cannot break the next one
 
 ## 2026-10-20

@@ -35,10 +35,20 @@ From then on:
 
 - **Shooter, turret, intake, hopper and kicker are off.** Their buttons do nothing, and no
   autonomous routine runs, since every one needs a mechanism.
-- **The drive gets everything.** Top speed rises from the normal cap to the drive motors' free
-  speed (3.71 m/s with the current gearing), the dashboard **Drive Speed** setting is ignored, and
-  each drive motor's current limit goes from 40 A to 60 A
-  (`CyberPsycho.DRIVE_CURRENT_LIMIT_AMPS`).
+- **The drive gets everything.** Every limit on the drive NEOs comes off, and the dashboard
+  **Drive Speed** setting is ignored, so full stick is full power:
+  - Speed cap: from 3.05 m/s to 4.02 m/s, the NEO's free speed (473 RPM per volt, 5676 RPM at
+    12 V) on a full 13 V battery through the 8.14:1 gearing in the swerve config. Under load the
+    battery sags below that, so full stick always asks for more than the motors have and they
+    run flat out.
+  - Voltage compensation off, so a fresh battery's extra volt reaches the wheels instead of
+    being scaled down to 12 V.
+  - Current limit: 40 A to 80 A per motor (`CyberPsycho.DRIVE_CURRENT_LIMIT_AMPS`). That is
+    REV's factory setting for the SPARK MAX, which is rated for 60 A continuous and 100 A for
+    2 s; the NEO itself stalls at 105 A. Above about 44 A the wheels break traction at launch,
+    so the top of that range shows up as wheel spin, and four motors at 80 A can pull the
+    battery down to a brownout.
+  - Ramp rate: 0.25 s to none.
 - **The Limelight becomes a plain camera.** The robot stops reading tags and switches the camera
   to pipeline **9** (`LimeLightConstants.DRIVER_CAMERA_PIPELINE`). Set pipeline 9 up once in the
   Limelight web UI as a **Viewfinder** pipeline with the exposure turned up for driving. If it is
@@ -47,4 +57,4 @@ From then on:
 
 **There is no way out.** No button, dashboard setting or disable ends it. Only restarting the
 robot program does (power cycle, or Restart Robot Code in the Driver Station), which also puts
-the drive current limit back to 40 A.
+the drive motors' current limit, voltage compensation and ramp back.

@@ -29,10 +29,10 @@ import frc.robot.vision.Limelight;
  *       and kicker, writes zero to all of them every loop, and refuses anything else that asks
  *       for them. Buttons, default commands and autonomous routines that need a mechanism are
  *       simply not scheduled, rather than each binding having to know about this mode.</li>
- *   <li><b>The drive gets the power.</b> Top speed rises from the normal cap to the drive motors'
- *       free speed, teleop stops applying the dashboard's speed setting, and each drive motor's
- *       current limit goes up to {@link #DRIVE_CURRENT_LIMIT_AMPS}. See
- *       {@link SwerveSubsystem#unleash}.</li>
+ *   <li><b>The drive gets everything.</b> The speed cap rises past what the NEOs can reach on a
+ *       full battery, teleop stops applying the dashboard's speed setting, voltage compensation
+ *       and the ramp rate come off, and each drive motor's current limit goes up to
+ *       {@link #DRIVE_CURRENT_LIMIT_AMPS}. See {@link SwerveSubsystem#unleash}.</li>
  *   <li><b>The Limelight becomes a camera.</b> See {@link Limelight#setCameraOnly}.</li>
  *   <li><b>Everyone is told.</b> Both controllers rumble, the console says so, and
  *       {@code Dashboard/CyberPsycho/Active} goes true, which is what sends the driver station
@@ -54,13 +54,28 @@ public final class CyberPsycho {
   /**
    * Drive motor current limit once active, per motor, in amps. The JSON's normal limit is 40.
    *
-   * <p>Not the SparkMax's 80 A ceiling, on purpose. Four NEOs at 80 A ask the battery for 320 A
-   * when the robot launches from a stop, which sags it below the roboRIO's brownout threshold,
-   * and a browned-out robot disables every motor at once -- the opposite of more power to the
-   * wheels. 60 A is the top of the range REV recommends for a NEO drivetrain, and with every
-   * mechanism at zero the drive is the only thing drawing.
+   * <p>As much as the hardware is built for. A NEO v1.1 stalls at 105 A, but the SPARK MAX
+   * driving it is rated for 60 A continuous and 100 A for a two-second surge, and 80 A is the
+   * limit REV ships it with. More than this and a pushing match holds the controller past its
+   * surge rating for as long as the push lasts.
+   *
+   * <p>What it costs: four NEOs at 80 A launching from a stop ask the battery for 320 A, which
+   * can sag it to the roboRIO's brownout threshold, and a browned-out robot drops every output
+   * at once. And past about 44 A per motor at this gearing and weight the wheels break traction
+   * at launch (COF 1.19), so the top of this range mostly becomes wheel spin rather than
+   * acceleration. Every mechanism is at zero, so the drive is the only thing drawing.
    */
-  public static final int DRIVE_CURRENT_LIMIT_AMPS = 60;
+  public static final int DRIVE_CURRENT_LIMIT_AMPS = 80;
+
+  /**
+   * The battery voltage the top speed is worked out at: a fully charged battery at rest.
+   *
+   * <p>A NEO turns 473 RPM per volt, so its rated 5676 RPM is a 12 V figure, and a fresh battery
+   * is worth about 8% more. Setting the cap here means full stick always asks for more than the
+   * motors can give once the battery sags under load, so they run flat out rather than being
+   * held to a target below what they could reach.
+   */
+  public static final double FULL_BATTERY_VOLTS = 13.0;
 
   /** How long both controllers rumble to say the code took. */
   private static final double RUMBLE_SECONDS = 1.0;
@@ -147,7 +162,7 @@ public final class CyberPsycho {
     active = true;
 
     CommandScheduler.getInstance().schedule(lockout);
-    double topSpeed = drivebase.unleash(DRIVE_CURRENT_LIMIT_AMPS);
+    double topSpeed = drivebase.unleash(DRIVE_CURRENT_LIMIT_AMPS, FULL_BATTERY_VOLTS);
     camera.setCameraOnly();
 
     for (RemappableController pad : pads) {
@@ -160,9 +175,10 @@ public final class CyberPsycho {
     table.getEntry("CyberPsycho/Active").setBoolean(true);
 
     DriverStation.reportWarning(String.format(
-        "[CYBERPSYCHO] ACTIVE, entered on the %s controller. Mechanisms locked out, drive"
-            + " unleashed to %.2f m/s at %d A per motor, Limelight is camera only. There is no"
-            + " way out short of restarting the robot program.",
+        "[CYBERPSYCHO] ACTIVE, entered on the %s controller. Mechanisms locked out. Drive"
+            + " unleashed: speed cap %.2f m/s, %d A per motor, no voltage compensation, no ramp."
+            + " Limelight is camera only. There is no way out short of restarting the robot"
+            + " program.",
         who, topSpeed, DRIVE_CURRENT_LIMIT_AMPS), false);
   }
 }

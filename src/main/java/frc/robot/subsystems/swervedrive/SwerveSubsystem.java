@@ -28,6 +28,7 @@ import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.kinematics.SwerveDriveKinematics;
+import edu.wpi.first.math.system.plant.DCMotor;
 import edu.wpi.first.math.trajectory.Trajectory;
 import edu.wpi.first.math.util.Units;
 import edu.wpi.first.wpilibj.DriverStation;
@@ -564,34 +565,51 @@ public class SwerveSubsystem extends SubsystemBase
   }
 
   /**
-   * CyberPsycho: hands the drive everything the motors have. One way; nothing puts it back.
+   * CyberPsycho: takes every limit off the drive motors. One way; nothing puts it back.
    *
-   * <p>The speed cap goes from {@link Constants#MAX_SPEED} to the drive motors' free speed through
-   * the configured gearing, which is the fastest a module can be commanded at all, and the turn
-   * rate rises to match it at the drive base radius. Both the allowable and the attainable limits
-   * move, because YAGSL drives at the lower of the two.
+   * <p>Four things hold a NEO drive back below what it can do, and all four come off:
    *
-   * <p>Each drive motor's current limit goes up to {@code driveCurrentAmps}. Written straight to
-   * the SparkMax rather than through YAGSL, whose setCurrentLimit only edits a cached config and
-   * then needs a blocking apply it warns about while enabled. configureAsync does not stall the
-   * loop, and it is not persisted, so a power cycle puts the JSON's limit back.
+   * <ul>
+   *   <li><b>The speed cap.</b> It goes from {@link Constants#MAX_SPEED} to the NEO's free speed
+   *       through the configured gearing at {@code fullBatteryVolts} -- faster than the robot can
+   *       actually go once the battery sags, which is the point: full stick then asks for more
+   *       than the motors have, and the velocity loop runs them flat out instead of holding them
+   *       to a target they could beat. The turn rate rises to match at the drive base radius.
+   *       Both YAGSL limits move, since it drives at the lower of the two.</li>
+   *   <li><b>Voltage compensation.</b> The swerve config scales output to 12 V, so a fresh
+   *       battery's extra volt never reached the wheels. Off, full output is the whole battery.
+   *       (This is also why CyberPsycho stays closed loop: YAGSL's open-loop mode hard-codes
+   *       12 V.)</li>
+   *   <li><b>The current limit</b>, up to {@code driveCurrentAmps}.</li>
+   *   <li><b>The ramp rate</b>, which held every change of output to a quarter-second slew.</li>
+   * </ul>
+   *
+   * <p>Written straight to each SparkMax rather than through YAGSL, whose setCurrentLimit only
+   * edits a cached config and then needs a blocking apply it warns about while enabled.
+   * configureAsync does not stall the loop, and nothing is persisted, so a power cycle puts the
+   * JSON's settings back.
    *
    * @return the new top speed, metres per second
    */
-  public double unleash(int driveCurrentAmps)
+  public double unleash(int driveCurrentAmps, double fullBatteryVolts)
   {
-    double topSpeed = swerveDrive.getMaximumModuleDriveVelocity();
+    // YAGSL's module speed is the NEO's rated free speed, which is at 12 V.
+    double ratedVolts = DCMotor.getNEO(1).nominalVoltageVolts;
+    double topSpeed = swerveDrive.getMaximumModuleDriveVelocity() * fullBatteryVolts / ratedVolts;
     double topTurn = topSpeed / swerveDrive.swerveDriveConfiguration.getDriveBaseRadiusMeters();
     swerveDrive.setMaximumAllowableSpeeds(topSpeed, topTurn);
     swerveDrive.setMaximumAttainableSpeeds(topSpeed, topTurn);
 
-    SparkMaxConfig current = new SparkMaxConfig();
-    current.smartCurrentLimit(driveCurrentAmps);
+    SparkMaxConfig unlimited = new SparkMaxConfig();
+    unlimited.smartCurrentLimit(driveCurrentAmps)
+             .disableVoltageCompensation()
+             .openLoopRampRate(0.0)
+             .closedLoopRampRate(0.0);
     for (SwerveModule module : swerveDrive.getModules())
     {
       if (module.getDriveMotor().getMotor() instanceof SparkMax spark)
       {
-        spark.configureAsync(current, ResetMode.kNoResetSafeParameters,
+        spark.configureAsync(unlimited, ResetMode.kNoResetSafeParameters,
                              PersistMode.kNoPersistParameters);
       }
     }

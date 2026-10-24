@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.revrobotics.spark.SparkMax;
 import edu.wpi.first.hal.HAL;
 import edu.wpi.first.networktables.NetworkTable;
 import edu.wpi.first.networktables.NetworkTableInstance;
@@ -24,6 +25,7 @@ import frc.robot.vision.Limelight;
 import java.io.OutputStream;
 import java.io.PrintStream;
 import java.lang.reflect.Field;
+import swervelib.SwerveModule;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -125,7 +127,9 @@ public class CyberPsychoIntegrationTest {
       Limelight camera = field("m_camera");
 
       double normalTop = drivebase.getSwerveDrive().getMaximumChassisVelocity();
-      double motorTop = drivebase.getSwerveDrive().getMaximumModuleDriveVelocity();
+      // The NEO's free speed is rated at 12 V; the cap is set for a full battery.
+      double motorTop = drivebase.getSwerveDrive().getMaximumModuleDriveVelocity()
+          * CyberPsycho.FULL_BATTERY_VOLTS / 12.0;
       assertTrue(motorTop > normalTop,
           "the motors' free speed should be above the normal cap, or there is nothing to unleash");
 
@@ -149,6 +153,15 @@ public class CyberPsychoIntegrationTest {
       assertEquals("CyberPsycho.Lockout", holder(shooter));
       assertEquals("CyberPsycho.Lockout", holder(turret));
       assertEquals(motorTop, drivebase.getSwerveDrive().getMaximumChassisVelocity(), 1e-9);
+      for (SwerveModule module : drivebase.getSwerveDrive().getModules()) {
+        SparkMax drive = (SparkMax) module.getDriveMotor().getMotor();
+        assertEquals(CyberPsycho.DRIVE_CURRENT_LIMIT_AMPS,
+            drive.configAccessor.getSmartCurrentLimit(), "drive current limit raised");
+        assertFalse(drive.configAccessor.getVoltageCompensationEnabled(),
+            "voltage compensation off, so a full battery reaches the wheels");
+        assertEquals(0.0, drive.configAccessor.getClosedLoopRampRate(), 1e-9);
+        assertEquals(0.0, drive.configAccessor.getOpenLoopRampRate(), 1e-9);
+      }
       assertTrue(camera.isCameraOnly());
       loops(1);
       assertEquals("CAMERA ONLY", camera.getStatus());
