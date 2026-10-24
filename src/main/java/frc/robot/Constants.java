@@ -22,7 +22,9 @@ public final class Constants
   public static final double ROBOT_MASS = (148 - 20.3) * 0.453592; // 32lbs * kg per pound
   public static final Matter CHASSIS    = new Matter(new Translation3d(0, 0, Units.inchesToMeters(8)), ROBOT_MASS);
   public static final double LOOP_TIME  = 0.13; //s, 20ms + 110ms sprk max velocity lag
-  public static final double MAX_SPEED  = Units.feetToMeters(10);
+  // The modules do 5.45 m/s. With the shooter out of action there is nothing else competing for
+  // current, so the drivetrain gets 90% of what it has rather than the 56% it was capped at.
+  public static final double MAX_SPEED  = 4.9;
   // Maximum speed of the robot in meters per second, used to limit acceleration.
 
 //  public static final class AutonConstants
@@ -246,6 +248,20 @@ public final class Constants
        * obvious cause. Only set a real number here once you have confirmed the index in the web UI.
        */
       public static final int APRILTAG_PIPELINE = 0;
+
+      /**
+       * A second AprilTag pipeline tuned for a bright field, or -1 if there is not one yet.
+       *
+       * <p>Set this to the index of a pipeline you have already tuned in the web UI, then flip to
+       * it with the bright-field binding. The robot never edits exposure itself: a robot that
+       * silently retunes the camera is one nobody can debug from the web UI afterwards.
+       *
+       * <p>To build it: copy the working AprilTag pipeline, then drop EXPOSURE until the tags
+       * are about the only thing not crushed to black, and only raise SENSOR GAIN afterwards if
+       * they end up too dark to decode. Lower exposure also shortens the shutter, which cuts the
+       * motion blur that a moving robot adds on top of the brightness.
+       */
+      public static final int BRIGHT_FIELD_PIPELINE = -1;
 
       // ---- Mounting pose (MEASURE THESE ON THE REAL ROBOT) -------------------
       // Lens position in the robot frame: +X forward, +Y left, +Z up. The camera is bolted to the

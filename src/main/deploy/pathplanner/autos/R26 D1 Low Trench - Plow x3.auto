@@ -1,0 +1,52 @@
+{
+  "version" : "2025.0",
+  "command" : {
+    "type" : "sequential",
+    "data" : {
+      "commands" : [ {
+        "type" : "named",
+        "data" : {
+          "name" : "GravityDeploy"
+        }
+      }, {
+        "type" : "path",
+        "data" : {
+          "pathName" : "L Start to Neutral LD"
+        }
+      }, {
+        "type" : "path",
+        "data" : {
+          "pathName" : "Neutral LD to Our Side"
+        }
+      }, {
+        "type" : "path",
+        "data" : {
+          "pathName" : "Our Side to Neutral LC"
+        }
+      }, {
+        "type" : "path",
+        "data" : {
+          "pathName" : "Neutral LC to Our Side"
+        }
+      }, {
+        "type" : "path",
+        "data" : {
+          "pathName" : "Our Side to Neutral L"
+        }
+      }, {
+        "type" : "path",
+        "data" : {
+          "pathName" : "Neutral L to Outpost"
+        }
+      }, {
+        "type" : "named",
+        "data" : {
+          "name" : "StopAll"
+        }
+      } ]
+    }
+  },
+  "resetOdom" : true,
+  "folder" : "Rebuilt HP",
+  "choreoAuto" : false
+}

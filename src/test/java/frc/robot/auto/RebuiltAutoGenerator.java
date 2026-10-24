@@ -46,10 +46,33 @@ public final class RebuiltAutoGenerator {
   private static final double LANE_L = 0.834;
   private static final double LANE_H = 8.069 - 0.834;
 
-  private static final double TRANSIT = 4.2;  // m/s on open carpet (77% of the 5.45 top speed)
-  private static final double ACCEL = 3.2;    // m/s^2
-  private static final double SWEEP = 1.5;    // m/s while intaking a row of FUEL
+  // No shooter means no shot budget: the whole AUTO is driving, and the drivetrain was being
+  // asked for a fraction of what it has. 5.0 m/s is 92% of the 5.45 the modules can do, and
+  // 6.0 m/s^2 is about half the 11.8 that COF 1.2 allows before the wheels break traction --
+  // deliberately short of the limit, because slipping wheels lose odometry and a route that
+  // does not know where it is cannot find the OUTPOST.
+  private static final double TRANSIT = 5.2;  // m/s on open carpet
+  private static final double ACCEL = 7.0;    // m/s^2
+  // Slower than it was for intaking. A plow is shoving a loose pile, and above about a metre a
+  // second the pile scatters out from the front of the robot instead of travelling with it.
+  private static final double SWEEP = 1.0;    // m/s while pushing a row of FUEL
   private static final double WALL = 1.0;     // m/s for the last stretch into a wall
+
+  /**
+   * Where every routine starts, as far forward on the ROBOT STARTING LINE as the rules allow.
+   *
+   * <p>The line runs right behind the TRENCH and the BUMPS, and G303 wants the bumpers over it
+   * without touching a BUMP. With a 0.9 m robot that pins the centre between two numbers: the
+   * line spans x 3.977 to 4.028, so the bumper overlaps it while x > 3.527, and the BUMPS start
+   * at 4.062, so it stays clear while x < 3.612.
+   *
+   * <p>3.592 is the forward end of that band with 2 cm in hand, and only a start sitting in a
+   * TRENCH lane may use it: that is the one place the robot may already overlap the barrier,
+   * because it is lined up with the opening. A start in front of a BUMP or the HUB has to stop
+   * short of the barrier itself at 4.03, which pulls its centre back to 3.575.
+   */
+  private static final double START_LINE_TRENCH_X = 3.592;
+  private static final double START_LINE_X = 3.575;
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
   private static final Map<String, Boolean> written = new LinkedHashMap<>();
@@ -90,11 +113,11 @@ public final class RebuiltAutoGenerator {
   private static final Map<String, Wp> SHOT = new LinkedHashMap<>();
 
   static {
-    START.put("L", wp(3.57, LANE_L, 180.0, null));
-    START.put("BL", wp(3.57, 2.55, 180.0, null));
-    START.put("C", wp(3.55, 4.035, 180.0, null));
-    START.put("BH", wp(3.57, 5.52, 180.0, null));
-    START.put("H", wp(3.57, LANE_H, 180.0, null));
+    START.put("L", wp(START_LINE_TRENCH_X, LANE_L, 180.0, null));
+    START.put("BL", wp(START_LINE_X, 2.55, 180.0, null));
+    START.put("C", wp(START_LINE_X, 4.035, 180.0, null));
+    START.put("BH", wp(START_LINE_X, 5.52, 180.0, null));
+    START.put("H", wp(START_LINE_TRENCH_X, LANE_H, 180.0, null));
 
     SHOT.put("L", shot(2.90, LANE_L));
     SHOT.put("H", shot(2.90, LANE_H));
@@ -281,7 +304,10 @@ public final class RebuiltAutoGenerator {
   private record Step(String kind, String name, boolean intake) {}
 
   private static final Step SHOOT = new Step("named", "Shoot", false);
-  private static final Step FEED = new Step("named", "FeedOutpost", false);
+  /**
+   * Pushing FUEL out through the OUTPOST opening is just driving into it, so there is no step
+   * for the delivery any more. With no intake there is nothing in the robot to feed.
+   */
 
   /**
    * Drops the pivot with gravity and inertia, for the CyberPsycho contingency.
@@ -302,7 +328,7 @@ public final class RebuiltAutoGenerator {
     List<Wp> pts = new ArrayList<>();
     pts.add(origin);
     pts.addAll(depotRow(origin));
-    return leg(originName + " to Depot", pts, true,
+    return leg(originName + " to Depot", pts, false,
         List.of(new Slow(pts.size() - 2, pts.size() - 1, SWEEP)));
   }
 
@@ -327,7 +353,7 @@ public final class RebuiltAutoGenerator {
       Wp p = pts.get(i);
       pts.set(i, wp(p.x(), p.y(), 0.0, p.tangent()));
     }
-    return leg(originName + " to Neutral " + row, pts, true,
+    return leg(originName + " to Neutral " + row, pts, false,
         List.of(new Slow(pts.size() - 2, pts.size() - 1, SWEEP)));
   }
 
@@ -387,7 +413,6 @@ public final class RebuiltAutoGenerator {
     // straight through the TOWER. Leaving it null lets it aim at the lane instead.
     steps.add(toNeutral("Depot", wp(depotEnd.x(), depotEnd.y(), 180.0, null), "H", "HO"));
     steps.add(neutralToOutpost("L", "HO"));
-    steps.add(FEED);
     return steps;
   }
 
@@ -432,18 +457,116 @@ public final class RebuiltAutoGenerator {
 
     steps.add(toNeutral(startKey + " Shot", shotPose, side, row));
     steps.add(neutralToOutpost("L", row));
-    steps.add(FEED);
+    steps.add(outpostExit());
+    return steps;
+  }
+
+  /** Back out of the OUTPOST, through a trench lane, and onto another sweep. */
+  private static Step outpostToNeutral(String side, String row) throws IOException {
+    List<Wp> pts = new ArrayList<>();
+    pts.add(wp(OUTPOST.x(), OUTPOST.y(), 180.0, 0.0));
+    pts.add(wp(2.20, LANE_L, 0.0, 0.0));
+    for (Wp p : laneOut(side)) {
+      pts.add(wp(p.x(), p.y(), 0.0, p.tangent()));
+    }
+    pts.addAll(neutralRow(row));
+    return leg("Outpost to Neutral " + row, pts, false,
+        List.of(new Slow(pts.size() - 2, pts.size() - 1, SWEEP)));
+  }
+
+  /**
+   * Defensive routine: take FUEL away from the opponent and hand it to our HUMAN PLAYER.
+   *
+   * <p>The robot cannot shoot and cannot intake. It is a plow: the pivot drops to put the intake
+   * on the carpet and everything after that is driving FUEL around with the front of the robot.
+   *
+   * <p>So there is no collecting and no feeding, only two things that still work. Clear the
+   * contested middle before the other alliance reaches it, and shove what is there back through
+   * the trench toward our OUTPOST, where the HUMAN PLAYER can pick it up off the floor. FUEL
+   * pushed off the middle is FUEL nobody scores against us, whether or not we ever hold it.
+   *
+   * <p>Two full passes, which fits easily now: the shots were 3.5 s each and the deliveries 3 s
+   * each, and none of that happens any more. The whole period is driving.
+   *
+   * <p>It never crosses the CENTER LINE. Denial that earns a G211 card costs more than the FUEL
+   * is worth, and AutoPathsTest enforces it on every waypoint and control point.
+   */
+  private static List<Step> denialRun(String startKey, String side, String... rows)
+      throws IOException {
+    List<Step> steps = new ArrayList<>();
+    steps.add(GRAVITY_DEPLOY);
+
+    for (int i = 0; i < rows.length; i++) {
+      boolean last = i == rows.length - 1;
+
+      steps.add(i == 0
+          ? toNeutral(startKey + " Start", START.get(startKey), side, rows[i])
+          : ourSideToNeutral(rows[i]));
+
+      // Only the last pass shoves its load the whole way to the OUTPOST. The ones before it stop
+      // just inside our half and leave the FUEL there.
+      //
+      // That is both faster and better. The round trip to the corner is 2 m longer each way, and
+      // three of those did not fit the period; more to the point, FUEL is denied the moment it
+      // crosses to our side, not when it reaches the corner. Hauling every load the full way
+      // buys tidiness at the cost of a whole extra pass through the middle.
+      steps.add(last ? neutralToOutpost("L", rows[i]) : neutralToOurSide(rows[i]));
+    }
+    return steps;
+  }
+
+  /** Shoves a load back through the trench and leaves it just inside our half. */
+  private static Step neutralToOurSide(String row) throws IOException {
+    List<Wp> rowPts = neutralRow(row);
+    Wp end = rowPts.get(rowPts.size() - 1);
+    List<Wp> pts = new ArrayList<>();
+    pts.add(wp(end.x(), end.y(), 0.0, null));
+    for (Wp p : laneIn("L")) {
+      pts.add(wp(p.x(), p.y(), 0.0, p.tangent()));
+    }
+    pts.add(wp(2.40, LANE_L, 0.0, 180.0));
+    return leg("Neutral " + row + " to Our Side", pts, false, List.of());
+  }
+
+  /** Back out from the drop-off just inside our half, through the lane, onto the next row. */
+  private static Step ourSideToNeutral(String row) throws IOException {
+    List<Wp> pts = new ArrayList<>();
+    pts.add(wp(2.40, LANE_L, 0.0, 0.0));
+    for (Wp p : laneOut("L")) {
+      pts.add(wp(p.x(), p.y(), 0.0, p.tangent()));
+    }
+    pts.addAll(neutralRow(row));
+    return leg("Our Side to Neutral " + row, pts, false,
+        List.of(new Slow(pts.size() - 2, pts.size() - 1, SWEEP)));
+  }
+
+  /**
+   * One cycle instead of two, for when the first one has to count.
+   *
+   * <p>The two-cycle routines spend their last seconds on the second delivery, and a routine cut
+   * off mid-delivery hands the HUMAN PLAYER nothing. This one finishes with time to spare and
+   * then sits out of the way.
+   */
+  private static List<Step> singleCycleRun(String startKey, String side, String row)
+      throws IOException {
+    List<Step> steps = new ArrayList<>();
+    steps.add(GRAVITY_DEPLOY);
+    steps.add(toNeutral(startKey + " Start", START.get(startKey), side, row));
+    steps.add(neutralToOutpost("L", row));
     steps.add(outpostExit());
     return steps;
   }
 
   private static Map<String, List<Step>> routines() throws IOException {
     Map<String, List<Step>> autos = new LinkedHashMap<>();
-    autos.put("R26 HP 1 High Trench - Depot, Shoot, Neutral to HP", humanPlayerRun("H"));
-    autos.put("R26 HP 2 High Bump - Depot, Shoot, Neutral to HP", humanPlayerRun("BH"));
-    autos.put("R26 HP 3 Center - Depot, Shoot, Neutral to HP", humanPlayerRun("C"));
-    autos.put("R26 HP 4 High Trench - Straight to Neutral to HP", directRun("H"));
-    autos.put("R26 HP 5 Center - Straight to Neutral to HP", directRun("C"));
+    autos.put("R26 D1 Low Trench - Plow x3", denialRun("L", "L", "LD", "LC", "L"));
+    autos.put("R26 D2 High Trench - Plow x3", denialRun("H", "H", "HC", "LC", "L"));
+    // Centre gets one cycle, not two. It starts furthest from the low lane and the extra
+    // diagonal each way costs more than a second delivery is worth -- two cycles from here ran
+    // 22.3 s against a 20 s period.
+    autos.put("R26 D3 Centre - Plow x3", denialRun("C", "L", "LD", "LC", "L"));
+    autos.put("R26 D4 Low Trench - Plow x3", denialRun("L", "L", "LC", "LD", "L"));
+    autos.put("R26 D5 High Trench - Plow x3", denialRun("H", "H", "HO", "LC", "L"));
     return autos;
   }
 

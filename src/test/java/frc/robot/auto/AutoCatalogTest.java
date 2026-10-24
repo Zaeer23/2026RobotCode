@@ -122,7 +122,8 @@ public class AutoCatalogTest {
       String total = String.format("%.1f s", t);
       assertTrue(t >= USES_AT_LEAST, auto + " is done at " + total + ", leaving AUTO unused");
       assertTrue(t <= AUTO_SECONDS + 1.0, auto + " runs " + total + ", well past AUTO");
-      assertTrue(lastShot >= 0.0 || lastFeed >= 0.0, auto + " never scores or feeds");
+      // Nothing scores directly on this branch. What matters is that the routine spends the
+      // period driving rather than finishing early and standing still.
       if (lastShot >= 0.0) {
         assertTrue(lastShot <= LAST_SHOT_STARTS_BY,
             auto + String.format(" starts its last shot at %.1f s, too late to finish", lastShot));
@@ -140,8 +141,12 @@ public class AutoCatalogTest {
     AutoCatalog catalog = catalog();
     for (String auto : rebuiltAutos()) {
       JsonNode steps = catalog.stepsOf(auto);
-      assertEquals(1, count(steps, "FeedOutpost"),
-          auto + " must feed the OUTPOST exactly once");
+      // This branch can neither shoot nor intake, so a routine that tries to do either is
+      // commanding a mechanism that is not there.
+      assertEquals(0, count(steps, "Shoot"),
+          auto + " shoots, but there is no hood to shoot through");
+      assertEquals(0, count(steps, "FeedOutpost"),
+          auto + " feeds the OUTPOST, but with no intake there is nothing aboard to feed");
     }
   }
 
@@ -184,19 +189,15 @@ public class AutoCatalogTest {
   }
 
   @Test
-  void intakeRunsOnEveryCollectionPath() throws Exception {
-    // Driving to FUEL with the intake up collects nothing and still burns the time.
+  void noPathRunsTheIntake() throws Exception {
+    // This branch has no working intake. The pivot goes down to act as a plow and the FUEL is
+    // moved by driving into it, so a path that commands the intake is commanding a mechanism
+    // that is not there -- and the rollers would fight the push rather than help it.
     for (String auto : rebuiltAutos()) {
       for (JsonNode step : catalog().stepsOf(auto)) {
-        String name = step.path("name").asText();
-        boolean collecting = name.contains("to Neutral") || name.contains("to Chute")
-            || name.contains("to Depot");
-        if ("drive".equals(step.path("kind").asText()) && collecting) {
-          boolean intake = false;
-          for (JsonNode alongside : step.path("with")) {
-            intake |= "IntakeDown".equals(alongside.asText());
-          }
-          assertTrue(intake, auto + " / " + name + " should run the intake");
+        for (JsonNode alongside : step.path("with")) {
+          assertEquals("IntakeDown".equals(alongside.asText()), false,
+              auto + " / " + step.path("name").asText() + " runs the intake");
         }
       }
     }

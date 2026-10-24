@@ -284,31 +284,29 @@ private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
     // shouldFlipPath supplier in setupPathPlanner(), and 2026 Rebuilt is rotationally
     // symmetric, which is PathPlanner's default. Do not hand-write red copies.
     //
-    // Twenty routines built for the full 20 s AUTO, four from each of the five legal starting
-    // spots: low trench, low bump, centre, high bump, high trench ("low" is the OUTPOST side).
-    // Each robot starts squared with its BUMPERS over the ROBOT STARTING LINE (G303), crosses the
-    // barrier only under a TRENCH, never crosses the CENTER LINE (G403), and shoots only from
-    // inside the ALLIANCE ZONE (G407). AutoPathsTest checks every one of those.
+    // Five PLOW routines. This branch has no hood and no working intake, so none of them shoot
+    // and none of them collect: the pivot drops to put the intake on the carpet and the robot
+    // shoves FUEL with its front for the whole period.
     //
-    // "Hold" routines keep the 8 preloaded FUEL and shoot them with the first load, which saves a
-    // whole shot's worth of time. "Chute" ones collect the 24 FUEL the HUMAN PLAYER releases from
-    // the OUTPOST CHUTE at the start of AUTO, so tell them. "to HP" ones finish by feeding a load
-    // through the OUTPOST opening for the HUMAN PLAYER.
+    // Each makes three passes through the neutral zone. The first two leave their load just
+    // inside our half, because FUEL is denied the moment it crosses, and only the last one shoves
+    // it the rest of the way to the OUTPOST for the HUMAN PLAYER. Hauling every load to the
+    // corner cost a whole extra pass.
+    //
+    // Each starts squared with its BUMPERS over the ROBOT STARTING LINE (G303), crosses the
+    // barrier only under a TRENCH, and never crosses the CENTER LINE -- deliberate crossing is a
+    // G211 card, and denial that earns one costs more than the FUEL is worth. AutoPathsTest
+    // checks all of that on every waypoint and control point.
     autoCatalog.addPathPlanner(
-        "HP 1 High Trench - Depot, Shoot, Neutral to HP",
-        "R26 HP 1 High Trench - Depot, Shoot, Neutral to HP", true);
+        "D1 Low Trench - Plow x3", "R26 D1 Low Trench - Plow x3", true);
     autoCatalog.addPathPlanner(
-        "HP 2 High Bump - Depot, Shoot, Neutral to HP",
-        "R26 HP 2 High Bump - Depot, Shoot, Neutral to HP", false);
+        "D2 High Trench - Plow x3", "R26 D2 High Trench - Plow x3", false);
     autoCatalog.addPathPlanner(
-        "HP 3 Center - Depot, Shoot, Neutral to HP",
-        "R26 HP 3 Center - Depot, Shoot, Neutral to HP", false);
+        "D3 Centre - Plow x3", "R26 D3 Centre - Plow x3", false);
     autoCatalog.addPathPlanner(
-        "HP 4 High Trench - Straight to Neutral to HP",
-        "R26 HP 4 High Trench - Straight to Neutral to HP", false);
+        "D4 Low Trench - Plow x3", "R26 D4 Low Trench - Plow x3", false);
     autoCatalog.addPathPlanner(
-        "HP 5 Center - Straight to Neutral to HP",
-        "R26 HP 5 Center - Straight to Neutral to HP", false);
+        "D5 High Trench - Plow x3", "R26 D5 High Trench - Plow x3", false);
     autoCatalog.addInPlace(
         "Blind timed shoot (no vision)",
         new ShootingCommand(m_shooter, m_kicker, m_hopper),
@@ -527,6 +525,10 @@ private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
 
     operatorDiagnostic.and(shooterXbox.x())
         .onTrue(m_camera.toggleTargetFilterCommand());
+
+    // Bright field: swaps to the low-exposure AprilTag pipeline and back.
+    operatorDiagnostic.and(shooterXbox.leftStick())
+        .onTrue(m_camera.toggleBrightFieldCommand());
 
     // Measures the real intake pivot gear ratio from a hand sweep between the hard stops. Run it
     // DISABLED: rezero at one stop, move the pivot to the other by hand, then press this.

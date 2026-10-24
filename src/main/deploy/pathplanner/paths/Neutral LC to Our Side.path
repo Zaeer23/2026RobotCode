@@ -2,69 +2,54 @@
   "version" : "2025.0",
   "waypoints" : [ {
     "anchor" : {
-      "x" : 2.9,
-      "y" : 7.235
+      "x" : 7.05,
+      "y" : 3.2
     },
     "prevControl" : null,
     "nextControl" : {
-      "x" : 3.147,
-      "y" : 7.235
-    },
-    "isLocked" : false,
-    "linkedName" : null
-  }, {
-    "anchor" : {
-      "x" : 3.55,
-      "y" : 7.235
-    },
-    "prevControl" : {
-      "x" : 3.303,
-      "y" : 7.235
-    },
-    "nextControl" : {
-      "x" : 4.462,
-      "y" : 7.235
+      "x" : 6.632,
+      "y" : 2.3009
     },
     "isLocked" : false,
     "linkedName" : null
   }, {
     "anchor" : {
       "x" : 5.95,
-      "y" : 7.235
+      "y" : 0.834
     },
     "prevControl" : {
+      "x" : 6.9415,
+      "y" : 0.834
+    },
+    "nextControl" : {
       "x" : 5.038,
-      "y" : 7.235
-    },
-    "nextControl" : {
-      "x" : 6.4818,
-      "y" : 7.235
+      "y" : 0.834
     },
     "isLocked" : false,
     "linkedName" : null
   }, {
     "anchor" : {
-      "x" : 7.05,
-      "y" : 6.37
+      "x" : 3.55,
+      "y" : 0.834
     },
     "prevControl" : {
-      "x" : 7.05,
-      "y" : 6.9018
+      "x" : 4.462,
+      "y" : 0.834
     },
     "nextControl" : {
-      "x" : 7.05,
-      "y" : 4.5954
+      "x" : 3.113,
+      "y" : 0.834
     },
     "isLocked" : false,
     "linkedName" : null
   }, {
     "anchor" : {
-      "x" : 7.05,
-      "y" : 1.7
+      "x" : 2.4,
+      "y" : 0.834
     },
     "prevControl" : {
-      "x" : 7.05,
-      "y" : 3.4746
+      "x" : 2.837,
+      "y" : 0.834
     },
     "nextControl" : null,
     "isLocked" : false,
@@ -76,28 +61,13 @@
   }, {
     "waypointRelativePos" : 2,
     "rotationDegrees" : 0.0
-  }, {
-    "waypointRelativePos" : 3,
-    "rotationDegrees" : 0.0
   } ],
-  "constraintZones" : [ {
-    "name" : "Slow",
-    "minWaypointRelativePos" : 3,
-    "maxWaypointRelativePos" : 4,
-    "constraints" : {
-      "maxVelocity" : 1.5,
-      "maxAcceleration" : 3.2,
-      "maxAngularVelocity" : 540.0,
-      "maxAngularAcceleration" : 1000.0,
-      "nominalVoltage" : 12.0,
-      "unlimited" : false
-    }
-  } ],
+  "constraintZones" : [ ],
   "pointTowardsZones" : [ ],
   "eventMarkers" : [ ],
   "globalConstraints" : {
-    "maxVelocity" : 4.2,
-    "maxAcceleration" : 3.2,
+    "maxVelocity" : 5.2,
+    "maxAcceleration" : 7.0,
     "maxAngularVelocity" : 540.0,
     "maxAngularAcceleration" : 1000.0,
     "nominalVoltage" : 12.0,
@@ -111,7 +81,7 @@
   "folder" : "Rebuilt HP",
   "idealStartingState" : {
     "velocity" : 0,
-    "rotation" : -241.7
+    "rotation" : 0.0
   },
   "useDefaultConstraints" : false
 }

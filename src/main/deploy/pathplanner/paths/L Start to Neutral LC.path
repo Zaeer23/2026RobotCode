@@ -2,58 +2,43 @@
   "version" : "2025.0",
   "waypoints" : [ {
     "anchor" : {
-      "x" : 1.2,
-      "y" : 5.3
+      "x" : 3.592,
+      "y" : 0.834
     },
     "prevControl" : null,
     "nextControl" : {
-      "x" : 2.093,
-      "y" : 6.0353
+      "x" : 3.576,
+      "y" : 0.834
     },
     "isLocked" : false,
     "linkedName" : null
   }, {
     "anchor" : {
       "x" : 3.55,
-      "y" : 7.235
+      "y" : 0.834
     },
     "prevControl" : {
-      "x" : 2.3932,
-      "y" : 7.235
+      "x" : 3.534,
+      "y" : 0.834
     },
     "nextControl" : {
       "x" : 4.462,
-      "y" : 7.235
+      "y" : 0.834
     },
     "isLocked" : false,
     "linkedName" : null
   }, {
     "anchor" : {
       "x" : 5.95,
-      "y" : 7.235
+      "y" : 0.834
     },
     "prevControl" : {
       "x" : 5.038,
-      "y" : 7.235
+      "y" : 0.834
     },
     "nextControl" : {
-      "x" : 6.4818,
-      "y" : 7.235
-    },
-    "isLocked" : false,
-    "linkedName" : null
-  }, {
-    "anchor" : {
-      "x" : 7.05,
-      "y" : 6.37
-    },
-    "prevControl" : {
-      "x" : 7.05,
-      "y" : 6.9018
-    },
-    "nextControl" : {
-      "x" : 7.05,
-      "y" : 4.5954
+      "x" : 6.482,
+      "y" : 0.834
     },
     "isLocked" : false,
     "linkedName" : null
@@ -64,7 +49,22 @@
     },
     "prevControl" : {
       "x" : 7.05,
-      "y" : 3.4746
+      "y" : 1.168
+    },
+    "nextControl" : {
+      "x" : 7.05,
+      "y" : 2.27
+    },
+    "isLocked" : false,
+    "linkedName" : null
+  }, {
+    "anchor" : {
+      "x" : 7.05,
+      "y" : 3.2
+    },
+    "prevControl" : {
+      "x" : 7.05,
+      "y" : 2.63
     },
     "nextControl" : null,
     "isLocked" : false,
@@ -85,8 +85,8 @@
     "minWaypointRelativePos" : 3,
     "maxWaypointRelativePos" : 4,
     "constraints" : {
-      "maxVelocity" : 1.5,
-      "maxAcceleration" : 3.2,
+      "maxVelocity" : 1.0,
+      "maxAcceleration" : 7.0,
       "maxAngularVelocity" : 540.0,
       "maxAngularAcceleration" : 1000.0,
       "nominalVoltage" : 12.0,
@@ -96,8 +96,8 @@
   "pointTowardsZones" : [ ],
   "eventMarkers" : [ ],
   "globalConstraints" : {
-    "maxVelocity" : 4.2,
-    "maxAcceleration" : 3.2,
+    "maxVelocity" : 5.2,
+    "maxAcceleration" : 7.0,
     "maxAngularVelocity" : 540.0,
     "maxAngularAcceleration" : 1000.0,
     "nominalVoltage" : 12.0,
