@@ -104,6 +104,9 @@ public class Limelight extends SubsystemBase {
   private final java.util.Set<Integer> seenTagIds = new java.util.TreeSet<>();
   private final java.util.Set<Integer> rejectedTagIds = new java.util.TreeSet<>();
 
+  /** Pipeline this class holds the camera on. Starts at the normal AprilTag one. */
+  private int wantedPipeline = LimeLightConstants.APRILTAG_PIPELINE;
+
   private List<VisionTarget> visibleTargets = List.of();
   private Optional<VisionTarget> lockedTarget = Optional.empty();
   private int goodFrames = 0;
@@ -293,10 +296,51 @@ public class Limelight extends SubsystemBase {
 
   /** Keeps the camera in AprilTag mode so detection cannot be switched off behind our back. */
   private void enforcePipeline() {
-    int wanted = LimeLightConstants.APRILTAG_PIPELINE;
+    int wanted = wantedPipeline;
     if (wanted >= 0 && connected) {
       pipelineEntry.setNumber(wanted);
     }
+  }
+
+  /**
+   * Switches to the bright-field pipeline, or back to the normal one.
+   *
+   * <p>Exposure and gain live on the camera, not here — this class deliberately never writes
+   * camera settings, because a robot that silently retunes the camera is a robot nobody can
+   * debug from the web UI. What it can do is choose between pipelines you have already tuned, so
+   * keep a second one set up for bright light and flip to it.
+   *
+   * <p>What makes a bright-field pipeline: drop exposure until the tags are the only thing not
+   * crushed to black, then raise gain only if they are too dark to decode. Bright fields wash
+   * the black border into the white quiet zone, and a decoder that cannot find the border does
+   * not report a low-confidence tag — it reports nothing, which is why this looks like a dead
+   * camera rather than a struggling one.
+   */
+  public void setBrightFieldPipeline(boolean bright) {
+    int wanted = bright
+        ? LimeLightConstants.BRIGHT_FIELD_PIPELINE
+        : LimeLightConstants.APRILTAG_PIPELINE;
+    if (wanted < 0) {
+      System.out.println("[LIMELIGHT] No pipeline index configured for "
+          + (bright ? "bright field" : "normal") + "; leaving the camera alone.");
+      return;
+    }
+    wantedPipeline = wanted;
+    System.out.println("[LIMELIGHT] Pipeline -> " + wanted
+        + (bright ? " (bright field)" : " (normal)"));
+  }
+
+  /** Flips between the normal and bright-field pipelines. */
+  public Command toggleBrightFieldCommand() {
+    return runOnce(() -> setBrightFieldPipeline(
+        wantedPipeline != LimeLightConstants.BRIGHT_FIELD_PIPELINE))
+        .ignoringDisable(true)
+        .withName("Limelight.toggleBrightField");
+  }
+
+  /** Which pipeline this class is holding the camera on. */
+  public int getWantedPipeline() {
+    return wantedPipeline;
   }
 
   /**
@@ -512,12 +556,30 @@ public class Limelight extends SubsystemBase {
 
     if (visibleTargets.isEmpty()) {
       lastWarnSeconds = now;
+
+      // Say which of the three it looks like, rather than listing all of them every time. A
+      // washed-out tag does not decode as a weak detection, it does not decode at all, so
+      // "nothing at all, ever" and "nothing right now" are different problems.
+      String diagnosis;
+      if (!rejectedTagIds.isEmpty()) {
+        diagnosis = "It HAS reported ids " + rejectedTagIds + ", which are not on the 2026 field,"
+            + " so the pipeline is on another season's field map.";
+      } else if (seenTagIds.isEmpty()) {
+        diagnosis = "No valid tag has EVER arrived. Check the pipeline is AprilTag type and"
+            + " family 36h11, then drop exposure: a washed-out tag does not decode weakly, it"
+            + " does not decode at all."
+            + (LimeLightConstants.BRIGHT_FIELD_PIPELINE >= 0
+                ? " A bright-field pipeline is configured; try switching to it."
+                : " Consider tuning a bright-field pipeline and setting BRIGHT_FIELD_PIPELINE.");
+      } else {
+        diagnosis = "It has seen " + seenTagIds + " before now, so the pipeline is right and"
+            + " this is the view: either nothing is in frame, or the tags are washing out at"
+            + " this range or angle. Lower exposure before raising gain.";
+      }
+
       DriverStation.reportWarning(
-          String.format(
-              "[LIMELIGHT] Connected and healthy but detecting NO tags, on pipeline %d. Confirm "
-                  + "that pipeline is AprilTag/Fiducial type, family 36h11, and exposure is low "
-                  + "enough that the tag is not washed out.",
-              getPipeline()),
+          String.format("[LIMELIGHT] Connected but detecting NO tags, on pipeline %d. %s",
+              getPipeline(), diagnosis),
           false);
       return;
     }

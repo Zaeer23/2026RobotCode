@@ -342,6 +342,31 @@ public Command manualTurretControl(Supplier<Double> speedSupplier) {
    * <p>Aiming is not part of this. The turret tracks on its own as a default command, so holding
    * this does not fight the driver for the chassis.
    */
+  /** How long the shot waits for the intake to lift clear before firing regardless. */
+  private static final double PIVOT_CLEARANCE_GRACE_SECONDS = 1.0;
+
+  private final edu.wpi.first.wpilibj.Timer pivotClearanceGrace = new edu.wpi.first.wpilibj.Timer();
+
+  /**
+   * True once the shot has waited long enough for the intake and is going to fire anyway.
+   *
+   * <p>Says so the first time, because a shot that fires without the intake clear is worth
+   * knowing about: it means the pivot is not getting where it is asked to go.
+   */
+  private boolean pivotGraceExpired() {
+    boolean expired = pivotClearanceGrace.hasElapsed(PIVOT_CLEARANCE_GRACE_SECONDS);
+    if (expired && !warnedPivotGrace) {
+      warnedPivotGrace = true;
+      edu.wpi.first.wpilibj.DriverStation.reportWarning(
+          String.format("[SHOOTER] Intake did not lift clear within %.1fs (pivot at %.0f deg,"
+              + " needs 65). Firing anyway.", PIVOT_CLEARANCE_GRACE_SECONDS,
+              intake.pivotAngleDegrees()), false);
+    }
+    return expired;
+  }
+
+  private boolean warnedPivotGrace = false;
+
   public Command shootWhenReadyCommand() {
     // Spin for the range the camera is actually reporting, re-evaluated every loop so the speed
     // tracks the robot as it settles. This was shooter.spinUp(), one fixed RPM for every shot on
@@ -365,15 +390,26 @@ public Command manualTurretControl(Supplier<Double> speedSupplier) {
             .andThen(intake.pivotBounceWhileFeedingCommand())
         : Commands.none();
 
-    Command fire = new FeedWhenReadyCommand(
+    // The pivot gate is time-limited. It used to be an unconditional AND, which meant a pivot
+    // that could not reach 65 degrees -- a weak gear, a reduced current limit, anything hanging
+    // up -- blocked the feed forever and the whole shot timed out having fired nothing. That is
+    // indistinguishable from "the auto did not fire", and it was the likeliest cause of it.
+    //
+    // After the grace period it fires anyway. A shot with the intake not fully clear may clip,
+    // but a shot that clips is recoverable information and a shot that never happens is not.
+    Command fire = Commands.sequence(
+        Commands.runOnce(pivotClearanceGrace::restart),
+        new FeedWhenReadyCommand(
         () -> shooter.isAtShotSpeed()
-            && (!Constants.IntakeConstants.ENABLED || intake.isClearOfShot()),
+            && (!Constants.IntakeConstants.ENABLED
+                || intake.isClearOfShot()
+                || pivotGraceExpired()),
         feeding -> {
           hopper.setFeedEnabled(feeding);
           kicker.setFeedEnabled(feeding);
           frc.robot.util.RobotLog.put("Shooter/Feeding", feeding);
         },
-        hopper, kicker);
+        hopper, kicker));
 
     // Keep ownership of the rollers and intake through speed recovery. Releasing the button or
     // the autonomous shot timeout interrupts all three and stops feeding.

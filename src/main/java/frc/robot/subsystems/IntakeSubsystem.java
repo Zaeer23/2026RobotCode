@@ -56,6 +56,21 @@ public class IntakeSubsystem extends SubsystemBase {
    */
   private static final double PIVOT_SHOOT_DEGREES = 75.0;
 
+  /**
+   * Pivot stator current limit, in amps.
+   *
+   * <p>25 rather than the 40 this ran at before, because the gear driving it is a temporary
+   * printed one. Current is torque: a NEO makes 2.6 Nm at its 105 A stall, so through the 83:1
+   * gearing 40 A reaches the arm as about 82 Nm and 25 A as about 52 Nm.
+   *
+   * <p>Only a third off on purpose. The net over the intake hood took the resistance out of the
+   * way, so the pivot no longer has to force its way down and 52 Nm is plenty to drive it
+   * normally -- but it is still a printed gear, and there is no reason to hand it the full 82.
+   *
+   * <p>Put it back to 40 when the real gear goes in.
+   */
+  private static final int PIVOT_CURRENT_LIMIT_AMPS = 25;
+
   private static final double PIVOT_BOUNCE_PERIOD_SECONDS = 0.18;
   /**
    * How far above the deployed angle still counts as "coming down".
@@ -138,7 +153,7 @@ public class IntakeSubsystem extends SubsystemBase {
       .withMotorInverted(false)
       .withIdleMode(MotorMode.BRAKE)
       .withSoftLimit(Degrees.of(PIVOT_MIN_DEGREES), Degrees.of(PIVOT_MAX_DEGREES))
-      .withStatorCurrentLimit(Amps.of(40))
+      .withStatorCurrentLimit(Amps.of(PIVOT_CURRENT_LIMIT_AMPS))
       .withClosedLoopRampRate(Seconds.of(0.1))
       .withOpenLoopRampRate(Seconds.of(0.1));
 
@@ -413,5 +428,10 @@ public class IntakeSubsystem extends SubsystemBase {
   /** True once the pivot is high enough to be out of the ball's way. */
   public boolean isClearOfShot() {
     return intakePivot.getAngle().in(Degrees) >= PIVOT_SHOOT_DEGREES - 10.0;
+  }
+
+  /** Where the pivot actually is, for diagnostics that need the number rather than the verdict. */
+  public double pivotAngleDegrees() {
+    return intakePivot.getAngle().in(Degrees);
   }
 }

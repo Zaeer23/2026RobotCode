@@ -542,6 +542,10 @@ private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
     operatorDiagnostic.and(shooterXbox.x())
         .onTrue(m_camera.toggleTargetFilterCommand());
 
+    // Bright field: swaps to the low-exposure AprilTag pipeline and back.
+    operatorDiagnostic.and(shooterXbox.leftStick())
+        .onTrue(m_camera.toggleBrightFieldCommand());
+
     // Measures the real intake pivot gear ratio from a hand sweep between the hard stops. Run it
     // DISABLED: rezero at one stop, move the pivot to the other by hand, then press this.
     operatorDiagnostic.and(shooterXbox.start())

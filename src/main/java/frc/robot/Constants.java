@@ -247,6 +247,20 @@ public final class Constants
        */
       public static final int APRILTAG_PIPELINE = 0;
 
+      /**
+       * A second AprilTag pipeline tuned for a bright field, or -1 if there is not one yet.
+       *
+       * <p>Set this to the index of a pipeline you have already tuned in the web UI, then flip to
+       * it with the bright-field binding. The robot never edits exposure itself: a robot that
+       * silently retunes the camera is one nobody can debug from the web UI afterwards.
+       *
+       * <p>To build it: copy the working AprilTag pipeline, then drop EXPOSURE until the tags
+       * are about the only thing not crushed to black, and only raise SENSOR GAIN afterwards if
+       * they end up too dark to decode. Lower exposure also shortens the shutter, which cuts the
+       * motion blur that a moving robot adds on top of the brightness.
+       */
+      public static final int BRIGHT_FIELD_PIPELINE = -1;
+
       // ---- Mounting pose (MEASURE THESE ON THE REAL ROBOT) -------------------
       // Lens position in the robot frame: +X forward, +Y left, +Z up. The camera is bolted to the
       // CHASSIS, so it does not rotate with the turret and tx is NOT turret error.
