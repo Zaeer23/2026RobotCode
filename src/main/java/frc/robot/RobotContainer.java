@@ -561,6 +561,15 @@ private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
     operatorDiagnostic.and(shooterXbox.x())
         .onTrue(m_camera.toggleTargetFilterCommand());
 
+    // CYBERPSYCHO power, on the driver bumpers. Inert outside the mode: the dashboard selector
+    // owns the speed cap there, and two controls fighting over it would be worse than one.
+    driverXbox.leftBumper().onTrue(
+        edu.wpi.first.wpilibj2.command.Commands.runOnce(() -> CyberPsycho.stepPower(-1))
+            .ignoringDisable(true).withName("CyberPsycho.Ease"));
+    driverXbox.rightBumper().onTrue(
+        edu.wpi.first.wpilibj2.command.Commands.runOnce(() -> CyberPsycho.stepPower(1))
+            .ignoringDisable(true).withName("CyberPsycho.Full"));
+
     // Bright field: swaps to the low-exposure AprilTag pipeline and back.
     operatorDiagnostic.and(shooterXbox.leftStick())
         .onTrue(m_camera.toggleBrightFieldCommand());
@@ -676,6 +685,7 @@ private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
   public void updateCyberPsycho()
   {
     CyberPsycho.update(driverXbox.pov(), shooterXbox.pov());
+    CyberPsycho.pollArming();
 
     if (!CyberPsycho.isActive()) {
       return;
@@ -742,7 +752,7 @@ private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
     // CYBERPSYCHO: the dashboard's speed selector stops applying. The driver gets the whole
     // chassis velocity the modules can produce, with no scaling in between.
     double selectedLinearSpeed = CyberPsycho.isActive()
-        ? maxLinearSpeed
+        ? maxLinearSpeed * CyberPsycho.power().scale
         : Math.min(m_shuffleboard.getSelectedDriveSpeedMetersPerSecond(), maxLinearSpeed);
     double driveScale = maxLinearSpeed > 0.0 ? selectedLinearSpeed / maxLinearSpeed : 0.0;
 

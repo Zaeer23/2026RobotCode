@@ -1,0 +1,42 @@
+{
+  "version" : "2025.0",
+  "command" : {
+    "type" : "sequential",
+    "data" : {
+      "commands" : [ {
+        "type" : "path",
+        "data" : {
+          "pathName" : "C Start to Neutral LD"
+        }
+      }, {
+        "type" : "path",
+        "data" : {
+          "pathName" : "Neutral LD to Our Side"
+        }
+      }, {
+        "type" : "path",
+        "data" : {
+          "pathName" : "Our Side to Neutral LC"
+        }
+      }, {
+        "type" : "path",
+        "data" : {
+          "pathName" : "Neutral LC to Our Side"
+        }
+      }, {
+        "type" : "path",
+        "data" : {
+          "pathName" : "Our Side to Neutral L"
+        }
+      }, {
+        "type" : "path",
+        "data" : {
+          "pathName" : "Neutral L to Outpost"
+        }
+      } ]
+    }
+  },
+  "resetOdom" : true,
+  "folder" : "Rebuilt HP",
+  "choreoAuto" : false
+}

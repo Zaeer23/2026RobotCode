@@ -557,6 +557,32 @@ public final class RebuiltAutoGenerator {
     return steps;
   }
 
+  /**
+   * A CYBERPSYCHO routine: nothing but driving.
+   *
+   * <p>In that mode every mechanism is released and nothing is scheduled onto one, so a routine
+   * that called IntakeDown or Shoot would be commanding something that will not answer. These
+   * carry no named steps at all — the robot is a body shoving FUEL with the front of itself, and
+   * the paths are the whole routine.
+   *
+   * <p>They run the trench lanes rather than the bumps even here. Full speed over a 15 degree
+   * ramp with a 6.5 in crest is how a robot ends up on its side, and a robot on its side denies
+   * nothing.
+   */
+  private static List<Step> cyberPsychoRun(String startKey, String side, String... rows)
+      throws IOException {
+    List<Step> steps = new ArrayList<>();
+    for (int i = 0; i < rows.length; i++) {
+      steps.add(i == 0
+          ? toNeutral(startKey + " Start", START.get(startKey), side, rows[i])
+          : ourSideToNeutral(rows[i]));
+      steps.add(i == rows.length - 1
+          ? neutralToOutpost("L", rows[i])
+          : neutralToOurSide(rows[i]));
+    }
+    return steps;
+  }
+
   private static Map<String, List<Step>> routines() throws IOException {
     Map<String, List<Step>> autos = new LinkedHashMap<>();
     autos.put("R26 D1 Low Trench - Plow x3", denialRun("L", "L", "LD", "LC", "L"));
@@ -567,6 +593,12 @@ public final class RebuiltAutoGenerator {
     autos.put("R26 D3 Centre - Plow x3", denialRun("C", "L", "LD", "LC", "L"));
     autos.put("R26 D4 Low Trench - Plow x3", denialRun("L", "L", "LC", "LD", "L"));
     autos.put("R26 D5 High Trench - Plow x3", denialRun("H", "H", "HO", "LC", "L"));
+
+    // CYBERPSYCHO routines. Pure driving, no named steps: in that mode nothing else answers.
+    autos.put("R26 CP 1 Low Trench - Psycho Sweep", cyberPsychoRun("L", "L", "LD", "LC", "L"));
+    autos.put("R26 CP 2 High Trench - Psycho Sweep", cyberPsychoRun("H", "H", "HO", "LC", "L"));
+    autos.put("R26 CP 3 Centre - Psycho Sweep", cyberPsychoRun("C", "L", "LD", "LC", "L"));
+    autos.put("R26 CP 4 Low Trench - Psycho Deep", cyberPsychoRun("L", "L", "LC", "LD", "LC"));
     return autos;
   }
 
@@ -596,6 +628,9 @@ public final class RebuiltAutoGenerator {
   }
 
   private static void writeAuto(String name, List<Step> steps) throws IOException {
+    // CYBERPSYCHO routines get no StopAll. It commands the shooter and turret, and in that mode
+    // nothing is scheduled onto them -- a tidy-up step for mechanisms that are not listening.
+    boolean cyberPsycho = name.contains(" CP ");
     ObjectNode auto = MAPPER.createObjectNode();
     auto.put("version", "2025.0");
     ObjectNode command = auto.putObject("command");
@@ -604,9 +639,11 @@ public final class RebuiltAutoGenerator {
     for (Step step : steps) {
       commands.add(stepJson(step));
     }
-    ObjectNode stop = commands.addObject();
-    stop.put("type", "named");
-    stop.putObject("data").put("name", "StopAll");
+    if (!cyberPsycho) {
+      ObjectNode stop = commands.addObject();
+      stop.put("type", "named");
+      stop.putObject("data").put("name", "StopAll");
+    }
     auto.put("resetOdom", true);
     auto.put("folder", FOLDER);
     auto.put("choreoAuto", false);

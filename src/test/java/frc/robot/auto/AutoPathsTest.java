@@ -208,7 +208,11 @@ public class AutoPathsTest {
       List<String> paths = new ArrayList<>();
       collect(read(autoFile(auto)).path("command"), named, paths);
 
-      assertFalse(named.isEmpty(), auto + " calls no named commands at all");
+      // CYBERPSYCHO routines are pure driving by design: in that mode every mechanism is
+      // released, so a named step would command something that will not answer.
+      if (!auto.contains(" CP ")) {
+        assertFalse(named.isEmpty(), auto + " calls no named commands at all");
+      }
       for (String name : named) {
         assertTrue(
             REGISTERED_COMMANDS.contains(name),
@@ -430,7 +434,9 @@ public class AutoPathsTest {
     // The generator owns this set. If it emits a routine nobody added to the chooser, or the
     // chooser names one that no longer exists, the mismatch only shows up as a missing option on
     // the field.
-    long count = autos().stream().filter(a -> a.startsWith("R26 ")).count();
-    assertTrue(count == 5, "expected 5 R26 HP autos, found " + count);
+    long plow = autos().stream().filter(a -> a.startsWith("R26 D")).count();
+    long psycho = autos().stream().filter(a -> a.startsWith("R26 CP ")).count();
+    assertTrue(plow == 5, "expected 5 plow routines, found " + plow);
+    assertTrue(psycho == 4, "expected 4 CYBERPSYCHO routines, found " + psycho);
   }
 }

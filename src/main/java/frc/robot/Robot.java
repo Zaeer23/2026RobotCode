@@ -144,6 +144,8 @@ public class Robot extends TimedRobot
   {
     m_robotContainer.setMotorBrake(true);
     m_robotContainer.applySelectedStartPose();
+    // Armed on the dashboard before the match: AUTO is where that becomes irreversible.
+    CyberPsycho.engage();
     m_robotContainer.reportAutoHealth();
     m_autonomousCommand = m_robotContainer.getAutonomousCommand();
 
@@ -167,6 +169,16 @@ public class Robot extends TimedRobot
   @Override
   public void autonomousPeriodic()
   {
+  }
+
+  /**
+   * AUTO is over. In CYBERPSYCHO that is the cue for the dashboard to drop everything but the
+   * camera, so the driver has a clean picture for the rest of the match.
+   */
+  @Override
+  public void autonomousExit()
+  {
+    CyberPsycho.autonomousFinished();
   }
 
   @Override

@@ -65,6 +65,13 @@ public class DashboardApp {
   private NetworkTable controls;
   private NetworkTable autoChooser;
   private final PsychoOverlay psychoOverlay = new PsychoOverlay();
+  private PsychoArmPanel psychoArm;
+
+  /** Fills the window with just the camera once AUTO is done in CYBERPSYCHO. */
+  private final JPanel cameraOnlyPane = new JPanel(new BorderLayout());
+  private boolean showingCameraOnly = false;
+  private JFrame frame;
+  private JTabbedPane tabs;
 
   private final MusicPlayer player = new MusicPlayer();
 
@@ -141,7 +148,7 @@ public class DashboardApp {
     controls = nt.getTable("Controls");
     autoChooser = nt.getTable("SmartDashboard").getSubTable(AUTO_CHOOSER);
 
-    JFrame frame = new JFrame("Team " + team + "  ·  Driver Dashboard");
+    frame = new JFrame("Team " + team + "  ·  Driver Dashboard");
     frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
     frame.setIconImages(HeaderBar.Badge.windowIcons(team));
     frame.setMinimumSize(new Dimension(1100, 680));
@@ -151,7 +158,7 @@ public class DashboardApp {
     header = new HeaderBar(team);
     frame.add(header, BorderLayout.NORTH);
 
-    JTabbedPane tabs = new JTabbedPane();
+    tabs = new JTabbedPane();
     tabs.addTab("Match", Icons.match(16, Theme.TEXT_DIM), buildMatchTab());
     autoTab = new AutoTab(label -> autoChooser.getEntry("selected").setString(label));
     tabs.addTab("Autonomous", Icons.route(16, Theme.TEXT_DIM), autoTab);
@@ -159,6 +166,10 @@ public class DashboardApp {
     tabs.addTab("Music", Icons.music(16, Theme.TEXT_DIM), new MusicTab(player));
     tabs.putClientProperty(FlatClientProperties.TABBED_PANE_TRAILING_COMPONENT, buildTabTrailer());
     frame.add(tabs, BorderLayout.CENTER);
+    cameraOnlyPane.setOpaque(true);
+    cameraOnlyPane.setBackground(Theme.SURFACE);
+    cameraOnlyPane.setVisible(false);
+    frame.add(cameraOnlyPane, BorderLayout.SOUTH);
 
     // One timer drives every refresh. Fast enough to feel live, slow enough to stay cheap.
     loadOfflineField();
@@ -236,12 +247,19 @@ public class DashboardApp {
     cameraCard.setPadding(14, 16, 16, 16);
     cameraCard.content(cameraView);
 
+    psychoArm = new PsychoArmPanel(dash);
+    Card psychoCard = new Card("CYBERPSYCHO",
+        "All power to the wheels, no mechanisms, no way back once AUTO starts");
+    psychoCard.setPadding(12, 16, 12, 16);
+    psychoCard.content(psychoArm);
+
     JSplitPane views = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, fieldCard, cameraCard);
     views.setResizeWeight(0.64);
     views.setBorder(null);
     views.setOpaque(false);
     views.setContinuousLayout(true);
     root.add(views, BorderLayout.CENTER);
+    root.add(psychoCard, BorderLayout.SOUTH);
     root.add(buildTiles(), BorderLayout.SOUTH);
     return root;
   }
@@ -445,7 +463,23 @@ public class DashboardApp {
     String robotIp = connections.length > 0 ? connections[0].remote_ip : null;
 
     boolean enabled = dash.getEntry("Enabled").getBoolean(false);
-    psychoOverlay.setActive(dash.getEntry("CyberPsycho/Active").getBoolean(false));
+    boolean psychoActive = dash.getEntry(CyberPsychoKeys.ACTIVE).getBoolean(false);
+    psychoArm.update(dash.getEntry(CyberPsychoKeys.ARMED).getBoolean(false), psychoActive);
+    psychoOverlay.setActive(psychoArm.shouldDistort());
+
+    // Once AUTO is over in this mode the screen is handed to the camera. Nothing else on it is
+    // useful when no mechanism is listening and the driver is going flat out.
+    boolean cameraOnly = psychoActive
+        && dash.getEntry(CyberPsychoKeys.AUTO_DONE).getBoolean(false);
+    if (cameraOnly != showingCameraOnly) {
+      showingCameraOnly = cameraOnly;
+      tabs.setVisible(!cameraOnly);
+      cameraOnlyPane.setVisible(cameraOnly);
+      if (cameraOnly) {
+        cameraOnlyPane.add(cameraView, BorderLayout.CENTER);
+      }
+      frame.revalidate();
+    }
     String alliance = dash.getEntry("Alliance").getString("");
     String activeAuto = autoChooser.getEntry("active").getString("");
 
