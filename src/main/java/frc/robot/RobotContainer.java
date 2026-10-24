@@ -3,6 +3,7 @@
 // the WPILib BSD license file in the root directory of this project.
 
 package frc.robot;
+import com.pathplanner.lib.commands.PathPlannerAuto;
 import com.pathplanner.lib.auto.NamedCommands;
 import edu.wpi.first.cameraserver.CameraServer;
 import edu.wpi.first.cscore.UsbCamera;
@@ -324,7 +325,41 @@ private final DashboardTelemetry m_dashboard = new DashboardTelemetry(
    */
   private Command loadAuto(String autoName)
   {
-    return drivebase.getAutonomousCommand(autoName);
+    Command loaded = drivebase.getAutonomousCommand(autoName);
+
+    // getAutonomousCommand hands back Commands.none() when AutoBuilder was never configured or
+    // the file would not parse. That lands in the chooser looking exactly like a routine that
+    // legitimately does nothing, and the only evidence is an error printed at BOOT, which has
+    // scrolled away hours before anyone queues for a match. The result: select an auto, enable,
+    // and the robot sits there.
+    //
+    // A real routine is a PathPlannerAuto. Anything else here failed to load.
+    if (!(loaded instanceof PathPlannerAuto)) {
+      failedAutos.add(autoName);
+    }
+    return loaded;
+  }
+
+  /** Routines that would not load, so autonomousInit can say so instead of sitting still. */
+  private final java.util.List<String> failedAutos = new java.util.ArrayList<>();
+
+  /**
+   * Shouts if anything failed to load, at the moment it matters rather than at boot.
+   *
+   * <p>Called from autonomousInit. A routine that cannot load is not a subtle problem — it is the
+   * whole of autonomous — so this is an error rather than a warning, and it names the file.
+   */
+  public void reportAutoHealth()
+  {
+    if (failedAutos.isEmpty()) {
+      return;
+    }
+    DriverStation.reportError(
+        "[AUTO] " + failedAutos.size() + " routine(s) FAILED TO LOAD and will do nothing if"
+            + " selected: " + failedAutos + ". Either PathPlanner's AutoBuilder is not configured"
+            + " (check deploy/pathplanner/settings.json loaded at boot) or those .auto files are"
+            + " missing or malformed on the roboRIO.",
+        false);
   }
 
   public void configureSubSystemKeys()
